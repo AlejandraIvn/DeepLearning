@@ -1,0 +1,15 @@
+﻿# Datos y pesos pesados
+data/
+models/*.pt
+models/*.pth
+models/*.onnx
+
+# Python / Jupyter
+__pycache__/
+*.pyc
+.ipynb_checkpoints/
+.venv/
+venv/
+
+# Entorno
+.env
