@@ -16,10 +16,16 @@ from .device import select_device
 from .model import CLASSES, load_checkpoint
 
 
+def checkpoint_transform(checkpoint: dict):
+    return make_image_transform(
+        checkpoint["architecture"]["image_size"], Normalization(**checkpoint["normalization"]),
+        preserve_aspect=checkpoint["preprocessing"].get("geometry") == "letterbox",
+    )
+
+
 def predict_image(checkpoint_path: Path, image_path: Path, device: torch.device | str = "cpu") -> dict:
     model, checkpoint = load_checkpoint(checkpoint_path, device)
-    normalization = Normalization(**checkpoint["normalization"])
-    transform = make_image_transform(checkpoint["architecture"]["image_size"], normalization)
+    transform = checkpoint_transform(checkpoint)
     with Image.open(image_path) as image:
         pixels = transform(image.convert("RGB")).unsqueeze(0).to(device)
     with torch.inference_mode():

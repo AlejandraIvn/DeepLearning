@@ -8,6 +8,8 @@ import torch
 from torch import nn
 from torch.nn import functional as F
 
+from .pretrained import RESNET18, PapilaResNet18
+
 
 ARCHITECTURE = "papila_cnn"
 CHECKPOINT_VERSION = 1
@@ -38,17 +40,20 @@ def read_checkpoint(path: Path) -> dict:
     if (
         not isinstance(checkpoint, dict)
         or checkpoint.get("format_version") != CHECKPOINT_VERSION
-        or checkpoint.get("architecture", {}).get("name") != ARCHITECTURE
+        or checkpoint.get("architecture", {}).get("name") not in (ARCHITECTURE, RESNET18)
         or tuple(checkpoint.get("classes", ())) != CLASSES
     ):
         raise ValueError(f"Checkpoint PAPILA incompatible: {path}")
     return checkpoint
 
 
-def load_checkpoint(path: Path, device: torch.device | str = "cpu") -> tuple[PapilaCNN, dict]:
-    """Restore the selected CNN and place it in evaluation mode."""
+def load_checkpoint(path: Path, device: torch.device | str = "cpu") -> tuple[PapilaCNN | PapilaResNet18, dict]:
+    """Restore a model in evaluation mode without downloading initial weights."""
     checkpoint = read_checkpoint(path)
     architecture = checkpoint["architecture"]
-    model = PapilaCNN(architecture["image_size"], architecture["dropout"])
+    if architecture["name"] == RESNET18:
+        model = PapilaResNet18(pretrained=False)
+    else:
+        model = PapilaCNN(architecture["image_size"], architecture["dropout"])
     model.load_state_dict(checkpoint["state_dict"])
     return model.to(device).eval(), checkpoint

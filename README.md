@@ -9,6 +9,7 @@ Sistema de clasificación de imágenes de fondo de ojo para estimar si hay glauc
 - [Preparación reproducible de PAPILA](#preparación-reproducible-de-papila)
 - [Carga de PAPILA y CUDA](#carga-de-papila-y-cuda)
 - [Entrenamiento de la CNN e inferencia local](#entrenamiento-de-la-cnn-e-inferencia-local)
+- [Transfer Learning con ResNet18](#transfer-learning-con-resnet18)
 - [Metodología](#metodología)
 - [Resultados](#resultados)
 - [Modelo final](#modelo-final)
@@ -112,6 +113,28 @@ Cada corrida escribe `history.csv`, `loss.png`, `summary.json` y `best.pt` en su
 ```
 
 La salida de inferencia es un puntaje académico de glaucoma sin calibrar. La aplicación de la sigmoide convierte el logit al rango `[0, 1]`.
+
+## Transfer Learning con ResNet18
+
+La ResNet18 usa `torchvision 0.29.1+cu130` y los pesos oficiales `ResNet18_Weights.IMAGENET1K_V1` (`resnet18-f37072fd.pth`, SHA-256 `f37072fd47e89c5e827621c5baffa7500819f7896bbacec160b1a16c560e07ec`). El backbone y sus estadísticas de BatchNorm quedan congelados. Solo se ajusta la cabeza lineal de 512 entradas y un logit, con 513 parámetros entrenables. [Pesos y normalización de Torchvision](https://docs.pytorch.org/vision/0.29/models/generated/torchvision.models.resnet18.html)
+
+La entrada RGB se ajusta dentro de `224 × 224` con interpolación bilineal, conservación de aspecto y padding negro centrado. Una imagen PAPILA de `2576 × 1934` ocupa `224 × 168`, con 28 píxeles de padding arriba y abajo. Se escala a `[0, 1]` y se aplica la media `(0.485, 0.456, 0.406)` y desviación `(0.229, 0.224, 0.225)` de ImageNet. Se sustituye el recorte central de las transformaciones oficiales por padding para conservar el campo visual. El único aumento es el volteo horizontal con probabilidad `0.5` en train.
+
+El entrenamiento usa el mismo manifiesto, `batch_size=16`, `num_workers=0`, Adam a `0.001`, semilla `42`, BCE con logits y AMP FP16 en CUDA. Se restaura la época de menor pérdida de validación con paciencia de cinco y máximo de 30 épocas. La validación usa FP32. Desde la raíz, con la `.venv` de CUDA y las dependencias de entrenamiento instaladas:
+
+```powershell
+.\.venv\Scripts\python.exe -m unittest discover -s tests -v
+.\.venv\Scripts\python.exe -m src.train --architecture resnet18 --dataset-dir data/papila --manifest data/papila_manifest.csv --run-dir models/runs/papila-resnet18-smoke --epochs 1
+.\.venv\Scripts\python.exe -m src.train --architecture resnet18 --dataset-dir data/papila --manifest data/papila_manifest.csv
+.\.venv\Scripts\python.exe -m src.compare --dataset-dir data/papila --manifest data/papila_manifest.csv
+.\.venv\Scripts\python.exe -m src.predict --checkpoint models/runs/papila-resnet18/best.pt --image path/to/fundus.jpg
+```
+
+La comparación recarga ambos checkpoints en las mismas imágenes de validación y usa `0.50` como referencia. Guarda `comparison.json`, `curves.png`, `predictions.csv` y `thresholds.csv` en `models/runs/papila-resnet18/comparison/`. Average Precision (AP) pondera la precisión por cada incremento de recall. El área trapezoidal PR-AUC se registra como una métrica separada. La pérdida BCE es comparable sobre esas etiquetas, con la reserva de que cada modelo usa su propio preprocesamiento. Los tiempos totales incluyen preparación y guardado, y dependen del número de épocas ejecutadas. [Definición de Average Precision](https://scikit-learn.org/stable/modules/generated/sklearn.metrics.average_precision_score.html)
+
+El análisis exploratorio usa una rejilla de `0.00` a `1.00` en pasos de `0.05`. Entre los umbrales con especificidad de al menos 80 %, maximiza sensibilidad y resuelve empates por mayor especificidad y luego mayor umbral. El punto elegido queda en el informe, separado del umbral `0.50` del checkpoint. Con 13 positivos, una sola imagen mueve la sensibilidad 7,7 puntos porcentuales. Las métricas de estos umbrales usan el mismo conjunto que los seleccionó. Una futura evaluación del test de PAPILA sería interna y exploratoria debido a su consulta histórica.
+
+Un experimento posterior de ajuste parcial podría descongelar `layer4` con un learning rate inferior al de la cabeza y conservar el protocolo de validación agrupado por paciente. La corrida actual ajusta exclusivamente la cabeza y reporta puntajes académicos sin calibrar.
 
 ## Metodología
 1. **Modelo base:** CNN con 2 bloques Conv2D (32 y 64 filtros, 3×3) + ReLU + MaxPool, capa densa de 128 unidades y salida sigmoide. Pérdida BCE y optimizador Adam (lr = 1e-3).

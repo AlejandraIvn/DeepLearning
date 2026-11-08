@@ -8,7 +8,7 @@ from dataclasses import dataclass
 from pathlib import Path, PurePosixPath, PureWindowsPath
 
 import torch
-from PIL import Image
+from PIL import Image, ImageOps
 from torch.utils.data import DataLoader, Dataset
 from torchvision import transforms
 
@@ -35,12 +35,23 @@ class Normalization:
     std: tuple[float, float, float]
 
 
+@dataclass(frozen=True)
+class Letterbox:
+    image_size: int
+
+    def __call__(self, image: Image.Image) -> Image.Image:
+        return ImageOps.pad(image, (self.image_size, self.image_size), Image.Resampling.BILINEAR, color=0)
+
+
 def make_image_transform(
-    image_size: int, normalization: Normalization | None = None, *, augment: bool = False,
+    image_size: int, normalization: Normalization | None = None, *,
+    augment: bool = False, preserve_aspect: bool = False,
 ) -> transforms.Compose:
     """Share the RGB image preprocessing across training, evaluation and inference."""
     steps = [
-        transforms.Resize((image_size, image_size), interpolation=transforms.InterpolationMode.BILINEAR),
+        Letterbox(image_size) if preserve_aspect else transforms.Resize(
+            (image_size, image_size), interpolation=transforms.InterpolationMode.BILINEAR,
+        ),
         transforms.ToTensor(),
     ]
     if augment:
@@ -157,16 +168,22 @@ def make_loaders(
     seed: int = 42,
     augment_train: bool = True,
     include_test: bool = False,
+    normalization: Normalization | None = None,
+    preserve_aspect: bool = False,
 ) -> PapilaLoaders:
     """Build CPU loaders using the CSV assignments. Enable test only for final evaluation."""
     if batch_size < 1 or num_workers < 0 or image_size < 1:
         raise ValueError("batch_size e image_size deben ser positivos y num_workers no puede ser negativo.")
     records = _read_manifest(manifest)
     device = device if device is not None else select_device()
-    base = make_image_transform(image_size)
-    stats = _fit_normalization(PapilaDataset(dataset_dir, records["train"], base))
-    evaluate = make_image_transform(image_size, stats)
-    train_transform = make_image_transform(image_size, stats, augment=True) if augment_train else evaluate
+    stats = normalization
+    if stats is None:
+        base = make_image_transform(image_size, preserve_aspect=preserve_aspect)
+        stats = _fit_normalization(PapilaDataset(dataset_dir, records["train"], base))
+    evaluate = make_image_transform(image_size, stats, preserve_aspect=preserve_aspect)
+    train_transform = make_image_transform(
+        image_size, stats, augment=True, preserve_aspect=preserve_aspect,
+    ) if augment_train else evaluate
 
     def loader(split: str, transform: Callable[[Image.Image], torch.Tensor]) -> DataLoader[Sample]:
         return DataLoader(
