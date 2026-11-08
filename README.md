@@ -7,6 +7,7 @@ Sistema de clasificación de imágenes de fondo de ojo para estimar si hay glauc
 ## Contenido
 - [Dataset](#dataset)
 - [Preparación reproducible de PAPILA](#preparación-reproducible-de-papila)
+- [Carga de PAPILA y CUDA](#carga-de-papila-y-cuda)
 - [Metodología](#metodología)
 - [Resultados](#resultados)
 - [Modelo final](#modelo-final)
@@ -54,6 +55,41 @@ Se verificó la decodificación de **488 imágenes**, se conciliaron **244** eti
 | Test  | 42  | 84  | 67  | 17 |
 
 Los conteos pasan de 272/64/84 en el experimento histórico a 274/62/84 con el nuevo método. Coincidir en el tamaño de prueba no implica que los pacientes sean los mismos. Dos ejecuciones sobre la misma fuente con semilla 42 produjeron CSV idénticos, con SHA-256 `c82776614b94d458e42e56b8f66270e1fbe0be9b4a80a741e2cb6923449ef5cd`. Los resultados de las secciones siguientes corresponden a la partición histórica.
+
+## Carga de PAPILA y CUDA
+
+El entorno verificado usa Windows, Python `3.14.6`, PyTorch `2.14.1+cu130` y torchvision `0.29.1+cu130`. CUDA `13.0` se verificó en una NVIDIA GeForce RTX 4050 Laptop GPU de 6 GB con el controlador `621.01`. En la `.venv` existente, ejecuta desde la raíz del proyecto:
+
+```powershell
+.\.venv\Scripts\python.exe -c "import torch, torchvision; print(torch.__version__, torchvision.__version__, torch.version.cuda); print(torch.cuda.is_available()); print(torch.cuda.get_device_name(0) if torch.cuda.is_available() else 'CPU')"
+.\.venv\Scripts\python.exe -m unittest discover -s tests -v
+```
+
+Para reproducir ese entorno en una copia nueva del repositorio, usa Python 3.14, un controlador NVIDIA compatible y el índice oficial `cu130`. Estos comandos son para una instalación nueva. [Instalación de PyTorch](https://pytorch.org/get-started/locally/)
+
+```powershell
+py -3.14 -m venv .venv
+.\.venv\Scripts\python.exe -m pip install --index-url https://download.pytorch.org/whl/cu130 torch==2.14.1+cu130 torchvision==0.29.1+cu130
+.\.venv\Scripts\python.exe -m pip install -r requirements-data.txt
+```
+
+Usa el CSV de la etapa anterior. `make_loaders` conserva sus asignaciones y valida que ningún paciente cruce entre conjuntos. Los valores iniciales son `batch_size=16`, `num_workers=0` e imágenes RGB de `96 × 96`. La media y la desviación por canal se calculan en una pasada por `train` sin *augmentation*. La decodificación se hace bajo demanda en CPU y el volteo horizontal aleatorio se aplica solo en `train`. El argumento `seed` controla el orden de carga y `torch.manual_seed(42)` inicializa también el generador usado por el *augmentation* con `num_workers=0`.
+
+```python
+from pathlib import Path
+
+import torch
+
+from src.data import make_loaders
+from src.device import select_device
+
+torch.manual_seed(42)
+device = select_device()
+loaders = make_loaders(Path("data/papila"), Path("data/papila_manifest.csv"), device=device)
+images, labels = device.move_batch(next(iter(loaders.train)))
+```
+
+El cargador real de prueba se habilita con `include_test=True` para la evaluación final. Con CUDA, los lotes usan memoria fijada y se transfieren con `non_blocking=True`. `device.autocast()` y `device.make_grad_scaler()` preparan AMP en FP16 y quedan deshabilitados en CPU. Al implementar la CNN entrenable con AMP, usa logits y `BCEWithLogitsLoss`, y aplica la sigmoide al obtener puntajes de predicción. [Documentación de DataLoader](https://docs.pytorch.org/docs/2.14/data.html) · [Documentación de AMP](https://docs.pytorch.org/docs/2.14/amp.html)
 
 ## Metodología
 1. **Modelo base:** CNN con 2 bloques Conv2D (32 y 64 filtros, 3×3) + ReLU + MaxPool, capa densa de 128 unidades y salida sigmoide. Pérdida BCE y optimizador Adam (lr = 1e-3).
