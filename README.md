@@ -6,6 +6,7 @@ Sistema de clasificación de imágenes de fondo de ojo para estimar si hay glauc
 
 ## Contenido
 - [Dataset](#dataset)
+- [Preparación reproducible de PAPILA](#preparación-reproducible-de-papila)
 - [Metodología](#metodología)
 - [Resultados](#resultados)
 - [Modelo final](#modelo-final)
@@ -27,6 +28,32 @@ Se usa el dataset PAPILA (repositorio fuente: https://github.com/valentinaache/g
 | Train | 272 | 21.0 % |
 | Val   | 64  | 20.3 % |
 | Test  | 84  | 20.2 % |
+
+## Preparación reproducible de PAPILA
+
+Esta etapa usa la [copia de PAPILA utilizada por el notebook](https://github.com/valentinaache/glaucomaPGUSab/tree/41f0a0718252dbed301adf90976b67688d918551), fijada al commit `41f0a0718252dbed301adf90976b67688d918551`. Consúltese también el [artículo de PAPILA](https://doi.org/10.1038/s41597-022-01388-1) y la [publicación oficial en Figshare](https://figshare.com/articles/dataset/PAPILA/14798004), que lista la versión 2 y la licencia GPL 3.0+. La corrida de verificación de esta etapa se hizo sobre la copia fijada de GitHub.
+
+Desde la raíz del proyecto, con Python 3.11 o posterior, coloca los datos en `data/papila/`. Esa ruta debe contener `FundusImages/` y `ClinicalData/`, con `patient_data_od.xlsx` y `patient_data_os.xlsx` dentro de esta última carpeta.
+
+```bash
+python -m pip install -r requirements-data.txt
+python -m src.prepare_papila --dataset-dir data/papila --output data/papila_manifest.csv --seed 42
+python -m unittest discover -s tests -v
+```
+
+El comando indexa y decodifica los JPEG, y los une con las etiquetas por paciente y ojo. En la copia fijada, la planilla `os` contiene ambos ojos con lateralidad explícita. La planilla `od` contiene únicamente ojos derechos, con lateralidad implícita. Se concilian las coincidencias entre planillas y se rechazan los duplicados dentro de una planilla, las contradicciones y los registros sin pareja. El manifiesto conserva las clases 0 y 1, con una fila por ojo elegible y las columnas `image_id`, `patient_id`, `eye`, `label`, `relative_path` y `split`. Las rutas son relativas a `--dataset-dir`.
+
+La partición usa la semilla **42** y agrupa a cada paciente por la combinación de diagnósticos de sus ojos elegibles. Así, los pacientes con un ojo sano y otro con glaucoma forman un estrato propio y cada ojo conserva su etiqueta. Dentro de cada estrato se ordenan los identificadores, se barajan con la semilla y se asignan pacientes a `train`, `val` y `test` en proporción aproximada de **65/15/20**, usando redondeo por restos mayores. Los empates se resuelven en el orden `train`, `val`, `test`. Los estratos pequeños pueden quedar ausentes de algún conjunto.
+
+Se verificó la decodificación de **488 imágenes**, se conciliaron **244** etiquetas derechas redundantes y se excluyeron **68** ojos sospechosos. El manifiesto contiene **420 imágenes** de **210 pacientes**, con cero pacientes compartidos entre conjuntos.
+
+| Split | Pacientes | Imágenes | Sanos (0) | Glaucoma (1) |
+|-------|----------:|---------:|----------:|-------------:|
+| Train | 137 | 274 | 217 | 57 |
+| Val   | 31  | 62  | 49  | 13 |
+| Test  | 42  | 84  | 67  | 17 |
+
+Los conteos pasan de 272/64/84 en el experimento histórico a 274/62/84 con el nuevo método. Coincidir en el tamaño de prueba no implica que los pacientes sean los mismos. Dos ejecuciones sobre la misma fuente con semilla 42 produjeron CSV idénticos, con SHA-256 `c82776614b94d458e42e56b8f66270e1fbe0be9b4a80a741e2cb6923449ef5cd`. Los resultados de las secciones siguientes corresponden a la partición histórica.
 
 ## Metodología
 1. **Modelo base:** CNN con 2 bloques Conv2D (32 y 64 filtros, 3×3) + ReLU + MaxPool, capa densa de 128 unidades y salida sigmoide. Pérdida BCE y optimizador Adam (lr = 1e-3).
