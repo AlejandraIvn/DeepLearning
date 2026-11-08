@@ -50,20 +50,23 @@ def _write_csv(path: Path, rows: list[dict]) -> None:
         writer.writerows(rows)
 
 
-def _plot_curves(output: Path, labels: torch.Tensor, scores: dict[str, torch.Tensor], models: dict) -> None:
+def plot_curves(
+    output: Path, labels: torch.Tensor, scores: dict[str, torch.Tensor],
+    areas: dict[str, tuple[float, float]], *, split_label: str,
+) -> None:
     figure = Figure(figsize=(10, 4.6), layout="constrained")
     FigureCanvasAgg(figure)
     roc, pr = figure.subplots(1, 2)
     for name, logits in scores.items():
-        metrics = models[name]["validation_at_0_5"]
+        roc_auc, average_precision = areas[name]
         false_positive_rate, sensitivity, _ = roc_curve(labels, logits)
         precision, recall, _ = precision_recall_curve(labels, logits)
-        roc.plot(false_positive_rate, sensitivity, label=f"{name} · AUC {metrics['val_roc_auc']:.3f}")
-        pr.step(recall, precision, where="post", label=f"{name} · AP {metrics['val_average_precision']:.3f}")
+        roc.plot(false_positive_rate, sensitivity, label=f"{name} · AUC {roc_auc:.3f}")
+        pr.step(recall, precision, where="post", label=f"{name} · AP {average_precision:.3f}")
     roc.plot([0, 1], [0, 1], "--", color="gray")
     pr.axhline(labels.mean().item(), linestyle="--", color="gray", label="Fracción positiva")
-    roc.set(title="ROC en validación", xlabel="1 − especificidad", ylabel="Sensibilidad")
-    pr.set(title="Precisión–recall en validación", xlabel="Sensibilidad", ylabel="Precisión")
+    roc.set(title=f"ROC · {split_label}", xlabel="1 − especificidad", ylabel="Sensibilidad")
+    pr.set(title=f"Precisión–recall · {split_label}", xlabel="Sensibilidad", ylabel="Precisión")
     for axis in (roc, pr):
         axis.set(xlim=(0, 1.02), ylim=(0, 1.02))
         axis.grid(alpha=0.2)
@@ -125,7 +128,11 @@ def compare_validation(
         for i, record in enumerate(records)
     ])
     _write_csv(output / "thresholds.csv", thresholds)
-    _plot_curves(output / "curves.png", labels, logits_by_model, models)
+    areas = {
+        name: (result["validation_at_0_5"]["val_roc_auc"], result["validation_at_0_5"]["val_average_precision"])
+        for name, result in models.items()
+    }
+    plot_curves(output / "curves.png", labels, logits_by_model, areas, split_label="validación")
     report = {
         "split": "val", "manifest_sha256": digest, "images": len(records),
         "patients": len({record.patient_id for record in records}), "positives": int(labels.sum().item()),

@@ -10,6 +10,7 @@ Sistema de clasificación de imágenes de fondo de ojo para estimar si hay glauc
 - [Carga de PAPILA y CUDA](#carga-de-papila-y-cuda)
 - [Entrenamiento de la CNN e inferencia local](#entrenamiento-de-la-cnn-e-inferencia-local)
 - [Transfer Learning con ResNet18](#transfer-learning-con-resnet18)
+- [Evaluación interna congelada de PAPILA](#evaluación-interna-congelada-de-papila)
 - [Metodología](#metodología)
 - [Resultados](#resultados)
 - [Modelo final](#modelo-final)
@@ -135,6 +136,24 @@ La comparación recarga ambos checkpoints en las mismas imágenes de validación
 El análisis exploratorio usa una rejilla de `0.00` a `1.00` en pasos de `0.05`. Entre los umbrales con especificidad de al menos 80 %, maximiza sensibilidad y resuelve empates por mayor especificidad y luego mayor umbral. El punto elegido queda en el informe, separado del umbral `0.50` del checkpoint. Con 13 positivos, una sola imagen mueve la sensibilidad 7,7 puntos porcentuales. Las métricas de estos umbrales usan el mismo conjunto que los seleccionó. Una futura evaluación del test de PAPILA sería interna y exploratoria debido a su consulta histórica.
 
 Un experimento posterior de ajuste parcial podría descongelar `layer4` con un learning rate inferior al de la cabeza y conservar el protocolo de validación agrupado por paciente. La corrida actual ajusta exclusivamente la cabeza y reporta puntajes académicos sin calibrar.
+
+## Evaluación interna congelada de PAPILA
+
+`configs/papila-internal-test.json` fija checkpoints, preprocesamiento, dependencias, umbrales e identidades SHA-256 del manifiesto y las imágenes de cada split. ResNet18, época 18, se evalúa a `0.35`. La CNN de referencia, época 8, se evalúa a `0.50`. Su umbral exploratorio de validación `0.55` se conserva como antecedente. Los resultados de validación en los umbrales aplicados se copiaron del informe de comparación previo, identificado por su hash.
+
+Desde la raíz, en PowerShell, indica la copia local de PAPILA y el manifiesto congelado:
+
+```powershell
+.\.venv\Scripts\python.exe -m unittest discover -s tests -v
+.\.venv\Scripts\python.exe -m src.internal_test --dataset-dir data/papila --manifest data/papila_manifest.csv --preflight
+.\.venv\Scripts\python.exe -m src.internal_test --dataset-dir data/papila --manifest data/papila_manifest.csv --confirm-internal-test
+```
+
+El preflight verifica bytes y particiones y prueba ambos modelos con tensores sintéticos. La confirmación explícita ejecuta una pasada por checkpoint en test, en FP32 y modo inferencia. Comprueba que los parámetros y buffers conservan su hash. La carpeta local `models/runs/papila-internal-test/` se reserva antes de abrir el primer JPEG de test y su existencia bloquea otra ejecución. Guarda la configuración, métricas, predicciones por ojo agrupadas también por paciente, matrices, curvas e información de reproducibilidad. Los artefactos quedan fuera de Git.
+
+Los intervalos exploratorios del 95 % usan 5.000 remuestreos percentiles por paciente con semilla 42. Cada extracción conserva ambos ojos y el mismo remuestreo para los dos modelos. Las réplicas con una métrica indefinida se omiten solo para esa métrica y se registra su cantidad. ROC-AUC y AP requieren ambas clases, sensibilidad y F requieren positivos reales, especificidad requiere negativos reales y precisión requiere predicciones positivas. [Bootstrap con datos oculares correlacionados](https://pmc.ncbi.nlm.nih.gov/articles/PMC7500131/)
+
+PAPILA test se consultó en experimentos históricos. Esta evaluación es interna y exploratoria. Las decisiones de modelo, umbral y preprocesamiento se fijaron en validación antes de ejecutarla. Los resultados describen puntajes académicos sin calibrar.
 
 ## Metodología
 1. **Modelo base:** CNN con 2 bloques Conv2D (32 y 64 filtros, 3×3) + ReLU + MaxPool, capa densa de 128 unidades y salida sigmoide. Pérdida BCE y optimizador Adam (lr = 1e-3).

@@ -1,0 +1,203 @@
+{
+  "format_version": 1,
+  "frozen_on": "2026-11-08",
+  "scope": "Evaluación interna exploratoria. El test PAPILA fue consultado históricamente.",
+  "class_positive": {
+    "label": 1,
+    "name": "glaucoma"
+  },
+  "dataset": {
+    "name": "PAPILA",
+    "source": "https://github.com/valentinaache/glaucomaPGUSab",
+    "revision": "41f0a0718252dbed301adf90976b67688d918551",
+    "source_jpegs_verified": 488,
+    "manifest_name": "manifest-c.csv",
+    "manifest_sha256": "c82776614b94d458e42e56b8f66270e1fbe0be9b4a80a741e2cb6923449ef5cd",
+    "partition_seed": 42,
+    "splits": {
+      "train": {
+        "images": 274,
+        "patients": 137,
+        "positives": 57,
+        "negatives": 217,
+        "patient_ids_sha256": "b3e3bb00320a1388a1f5eb1b26ac3c20814c3a4fa082ab04037bf76f464a350b",
+        "image_inventory_sha256": "d23cefd7ac3386aa3f67d8b31e85f0974cd1e6226cec1d0ae7b362459409d9c1"
+      },
+      "val": {
+        "images": 62,
+        "patients": 31,
+        "positives": 13,
+        "negatives": 49,
+        "patient_ids_sha256": "06035f77d72d79e92b9be6de77475236f67236a1c261fbaf352d8aff1746451c",
+        "image_inventory_sha256": "9d0c6b42a94d27732a3a9a3b17bf2e203e3f5609d44a27b5a10e05add92f8834"
+      },
+      "test": {
+        "images": 84,
+        "patients": 42,
+        "positives": 17,
+        "negatives": 67,
+        "patient_ids_sha256": "cbc082af4d60d302c79f63156393a39a906165cc04182f3c00d0c437cdcba3ae",
+        "image_inventory_sha256": "32b60d699a4a6d31ccd6fbe18d66fcbec163cb0a2bc85901b78a24a55a2b6c08"
+      }
+    }
+  },
+  "validation_source": {
+    "path": "models/runs/papila-resnet18/comparison/comparison.json",
+    "sha256": "08b1e122cd469e7cccef1babf2526113702c5bc9e57eb568d303850152bd920f"
+  },
+  "dependencies": {
+    "python": "3.14.6",
+    "torch": "2.14.1+cu130",
+    "torchvision": "0.29.1+cu130",
+    "numpy": "2.5.4",
+    "scipy": "1.18.1",
+    "Pillow": "12.3.0",
+    "scikit-learn": "1.9.1",
+    "matplotlib": "3.11.2"
+  },
+  "execution": {
+    "device": "cuda:0",
+    "gpu": "NVIDIA GeForce RTX 4050 Laptop GPU",
+    "cuda_version": "13.0",
+    "dtype": "float32",
+    "batch_size": 16,
+    "num_workers": 0,
+    "seed": 42,
+    "split": "test"
+  },
+  "bootstrap": {
+    "replicates": 5000,
+    "seed": 42,
+    "confidence": 0.95
+  },
+  "bootstrap_policy": {
+    "unit": "patient",
+    "paired_models": true,
+    "method": "percentile",
+    "retains_both_eyes": true,
+    "undefined": "ROC-AUC/AP require both true classes. Recall/F1/F2 require true positives in the cohort sense (label 1); specificity requires label 0; precision requires predicted positives. Undefined replicates are omitted per metric, with counts reported."
+  },
+  "models": {
+    "ResNet18": {
+      "checkpoint": "models/runs/papila-resnet18/best.pt",
+      "sha256": "721699061b8f0489b77d3f2ce19bccd0d6468a396fc315d1d112ef41c154b761",
+      "threshold": 0.35,
+      "role": "primary",
+      "metadata": {
+        "format_version": 1,
+        "architecture": {
+          "name": "resnet18",
+          "image_size": 224,
+          "dropout": 0.0
+        },
+        "epoch": 18,
+        "classes": [
+          "sano",
+          "glaucoma"
+        ],
+        "preprocessing": {
+          "color_mode": "RGB",
+          "interpolation": "bilinear",
+          "pixel_range": [
+            0,
+            1
+          ],
+          "geometry": "letterbox",
+          "normalization_source": "ImageNet",
+          "padding_fill": 0,
+          "centering": [
+            0.5,
+            0.5
+          ]
+        },
+        "normalization": {
+          "mean": [
+            0.485,
+            0.456,
+            0.406
+          ],
+          "std": [
+            0.229,
+            0.224,
+            0.225
+          ]
+        },
+        "pretrained_weights": {
+          "enum": "ResNet18_Weights.IMAGENET1K_V1",
+          "url": "https://download.pytorch.org/models/resnet18-f37072fd.pth",
+          "sha256": "f37072fd47e89c5e827621c5baffa7500819f7896bbacec160b1a16c560e07ec",
+          "backbone_frozen": true
+        }
+      },
+      "validation_metrics": {
+        "accuracy": 0.8870967741935484,
+        "precision": 0.75,
+        "recall": 0.6923076923076923,
+        "specificity": 0.9387755102040817,
+        "f1": 0.72,
+        "f2": 0.703125,
+        "roc_auc": 0.858712715855573,
+        "average_precision": 0.7271124492333398,
+        "fp": 3,
+        "fn": 4,
+        "tn": 46,
+        "tp": 9
+      }
+    },
+    "CNN": {
+      "checkpoint": "models/runs/papila-reference/best.pt",
+      "sha256": "fe5e32d5f250f7aa21214c16fc327a709d8b4c7520d56af54c3f249487e87ace",
+      "threshold": 0.5,
+      "role": "reference",
+      "metadata": {
+        "format_version": 1,
+        "architecture": {
+          "name": "papila_cnn",
+          "image_size": 96,
+          "dropout": 0.0
+        },
+        "epoch": 8,
+        "classes": [
+          "sano",
+          "glaucoma"
+        ],
+        "preprocessing": {
+          "color_mode": "RGB",
+          "interpolation": "bilinear",
+          "pixel_range": [
+            0,
+            1
+          ]
+        },
+        "normalization": {
+          "mean": [
+            0.3773696848149594,
+            0.13070325557539364,
+            0.06423410960159634
+          ],
+          "std": [
+            0.23220053097560545,
+            0.08921553277078968,
+            0.043371626203505785
+          ]
+        },
+        "pretrained_weights": null
+      },
+      "validation_metrics": {
+        "accuracy": 0.7903225806451613,
+        "precision": 0.5,
+        "recall": 0.38461538461538464,
+        "specificity": 0.8979591836734694,
+        "f1": 0.43478260869565216,
+        "f2": 0.4032258064516129,
+        "roc_auc": 0.7394034536891679,
+        "average_precision": 0.5613976203645883,
+        "fp": 5,
+        "fn": 8,
+        "tn": 44,
+        "tp": 5
+      },
+      "validation_only_exploratory_threshold": 0.55
+    }
+  }
+}
