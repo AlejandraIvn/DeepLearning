@@ -8,6 +8,7 @@ Sistema de clasificación de imágenes de fondo de ojo para estimar si hay glauc
 - [Dataset](#dataset)
 - [Preparación reproducible de PAPILA](#preparación-reproducible-de-papila)
 - [Carga de PAPILA y CUDA](#carga-de-papila-y-cuda)
+- [Entrenamiento de la CNN e inferencia local](#entrenamiento-de-la-cnn-e-inferencia-local)
 - [Metodología](#metodología)
 - [Resultados](#resultados)
 - [Modelo final](#modelo-final)
@@ -90,6 +91,27 @@ images, labels = device.move_batch(next(iter(loaders.train)))
 ```
 
 El cargador real de prueba se habilita con `include_test=True` para la evaluación final. Con CUDA, los lotes usan memoria fijada y se transfieren con `non_blocking=True`. `device.autocast()` y `device.make_grad_scaler()` preparan AMP en FP16 y quedan deshabilitados en CPU. Al implementar la CNN entrenable con AMP, usa logits y `BCEWithLogitsLoss`, y aplica la sigmoide al obtener puntajes de predicción. [Documentación de DataLoader](https://docs.pytorch.org/docs/2.14/data.html) · [Documentación de AMP](https://docs.pytorch.org/docs/2.14/amp.html)
+
+## Entrenamiento de la CNN e inferencia local
+
+La referencia usa la CNN histórica con salida de logits, Adam a `0.001`, BCE con logits, semilla `42`, lote `16`, imágenes RGB de `96 × 96`, `num_workers=0`, volteo horizontal en train, dropout y weight decay en `0`. Se detiene tras cinco épocas consecutivas sin mejora estricta de la pérdida de validación, hasta un máximo de 40. La época seleccionada es la de menor pérdida de validación. El umbral exploratorio de `0.5` se usa para las métricas y la clase predicha. PR-AUC es el área trapezoidal de la curva precisión–recall. ROC-AUC y PR-AUC quedan vacías cuando falta una clase en validación.
+
+Usa el manifiesto existente y una carpeta nueva por corrida. El bucle carga exclusivamente imágenes de train y val. En CUDA, el entrenamiento usa AMP FP16 y registra pasos omitidos por desbordamiento de gradientes. La validación y la inferencia usan FP32. El comando fija las semillas y activa los algoritmos deterministas de PyTorch. Esta corrida usa la partición nueva y AMP, por lo que sus métricas de validación corresponden a un experimento distinto del histórico. [Reproducibilidad de PyTorch](https://docs.pytorch.org/docs/2.14/notes/randomness.html)
+
+```powershell
+.\.venv\Scripts\python.exe -m pip install -r requirements-training.txt
+.\.venv\Scripts\python.exe -m unittest discover -s tests -v
+.\.venv\Scripts\python.exe -m src.train --dataset-dir data/papila --manifest data/papila_manifest.csv --run-dir models/runs/papila-smoke --epochs 1
+.\.venv\Scripts\python.exe -m src.train --dataset-dir data/papila --manifest data/papila_manifest.csv --run-dir models/runs/papila-reference
+```
+
+Cada corrida escribe `history.csv`, `loss.png`, `summary.json` y `best.pt` en su carpeta. El resumen registra el máximo de memoria asignada y reservada por PyTorch en CUDA. El checkpoint contiene pesos, época seleccionada, configuración, hash del manifiesto y normalización de train. Git excluye `models/runs/`. Consulta `python -m src.train --help` para ajustar los parámetros, y usa `--cpu` o `--no-amp` cuando corresponda.
+
+```powershell
+.\.venv\Scripts\python.exe -m src.predict --checkpoint models/runs/papila-reference/best.pt --image path/to/fundus.jpg
+```
+
+La salida de inferencia es un puntaje académico de glaucoma sin calibrar. La aplicación de la sigmoide convierte el logit al rango `[0, 1]`.
 
 ## Metodología
 1. **Modelo base:** CNN con 2 bloques Conv2D (32 y 64 filtros, 3×3) + ReLU + MaxPool, capa densa de 128 unidades y salida sigmoide. Pérdida BCE y optimizador Adam (lr = 1e-3).

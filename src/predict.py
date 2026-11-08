@@ -1,0 +1,51 @@
+"""Run local academic inference from a trained PAPILA checkpoint."""
+
+from __future__ import annotations
+
+import argparse
+import json
+import math
+from pathlib import Path
+from pickle import UnpicklingError
+
+import torch
+from PIL import Image
+
+from .data import Normalization, make_image_transform
+from .device import select_device
+from .model import CLASSES, load_checkpoint
+
+
+def predict_image(checkpoint_path: Path, image_path: Path, device: torch.device | str = "cpu") -> dict:
+    model, checkpoint = load_checkpoint(checkpoint_path, device)
+    normalization = Normalization(**checkpoint["normalization"])
+    transform = make_image_transform(checkpoint["architecture"]["image_size"], normalization)
+    with Image.open(image_path) as image:
+        pixels = transform(image.convert("RGB")).unsqueeze(0).to(device)
+    with torch.inference_mode():
+        score = torch.sigmoid(model(pixels)).item()
+    if not math.isfinite(score):
+        raise ValueError("El checkpoint produjo un puntaje no finito.")
+    threshold = checkpoint["config"]["threshold"]
+    label = int(score >= threshold)
+    return {"score_glaucoma": score, "threshold": threshold, "label": label,
+            "class": CLASSES[label], "selected_epoch": checkpoint["epoch"]}
+
+
+def main() -> None:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--checkpoint", type=Path, required=True)
+    parser.add_argument("--image", type=Path, required=True)
+    parser.add_argument("--cpu", action="store_true")
+    args = parser.parse_args()
+    device = select_device(prefer_cuda=not args.cpu, enable_amp=False)
+    try:
+        result = predict_image(args.checkpoint, args.image, device.device)
+    except (OSError, ValueError, RuntimeError, KeyError, UnpicklingError, Image.DecompressionBombError) as error:
+        parser.error(str(error))
+    print(json.dumps({**result, "device": str(device.device), "use": "puntaje académico sin calibrar"},
+                     ensure_ascii=False, allow_nan=False))
+
+
+if __name__ == "__main__":
+    main()

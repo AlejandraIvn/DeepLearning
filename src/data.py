@@ -35,6 +35,21 @@ class Normalization:
     std: tuple[float, float, float]
 
 
+def make_image_transform(
+    image_size: int, normalization: Normalization | None = None, *, augment: bool = False,
+) -> transforms.Compose:
+    """Share the RGB image preprocessing across training, evaluation and inference."""
+    steps = [
+        transforms.Resize((image_size, image_size), interpolation=transforms.InterpolationMode.BILINEAR),
+        transforms.ToTensor(),
+    ]
+    if augment:
+        steps.append(transforms.RandomHorizontalFlip(p=0.5))
+    if normalization is not None:
+        steps.append(transforms.Normalize(normalization.mean, normalization.std))
+    return transforms.Compose(steps)
+
+
 class PapilaDataset(Dataset[Sample]):
     """Decode and transform one RGB image at a time on the CPU."""
 
@@ -148,16 +163,10 @@ def make_loaders(
         raise ValueError("batch_size e image_size deben ser positivos y num_workers no puede ser negativo.")
     records = _read_manifest(manifest)
     device = device if device is not None else select_device()
-    base = transforms.Compose([
-        transforms.Resize((image_size, image_size), interpolation=transforms.InterpolationMode.BILINEAR),
-        transforms.ToTensor(),
-    ])
+    base = make_image_transform(image_size)
     stats = _fit_normalization(PapilaDataset(dataset_dir, records["train"], base))
-    normalize = transforms.Normalize(stats.mean, stats.std)
-    evaluate = transforms.Compose([base, normalize])
-    train_transform = transforms.Compose([
-        base, transforms.RandomHorizontalFlip(p=0.5), normalize,
-    ]) if augment_train else evaluate
+    evaluate = make_image_transform(image_size, stats)
+    train_transform = make_image_transform(image_size, stats, augment=True) if augment_train else evaluate
 
     def loader(split: str, transform: Callable[[Image.Image], torch.Tensor]) -> DataLoader[Sample]:
         return DataLoader(

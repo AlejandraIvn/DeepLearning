@@ -3,6 +3,7 @@ data/
 models/*.pt
 models/*.pth
 models/*.onnx
+models/runs/
 
 # Python / Jupyter
 __pycache__/
