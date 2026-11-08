@@ -1,26 +1,92 @@
-
-import { useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import './App.css'
+
+const maxImageBytes = 10 * 1024 * 1024
+const scoreFormat = new Intl.NumberFormat('es-CO', { minimumFractionDigits: 4, maximumFractionDigits: 4 })
+const connectionError = 'No se pudo conectar con el servidor de análisis. Comprueba que esté iniciado.'
 
 function App() {
   const [image, setImage] = useState(null)
   const [preview, setPreview] = useState(null)
+  const [result, setResult] = useState(null)
+  const [loading, setLoading] = useState(false)
+  const [error, setError] = useState('')
+  const activeRequest = useRef(null)
+
+  useEffect(() => () => {
+    if (preview) URL.revokeObjectURL(preview)
+  }, [preview])
+
+  useEffect(() => () => activeRequest.current?.abort(), [])
+
+  const changeImage = () => {
+    activeRequest.current?.abort()
+    activeRequest.current = null
+    setResult(null)
+    setLoading(false)
+    setError('')
+    setImage(null)
+    setPreview(null)
+  }
 
   const handleFile = (file) => {
-  if (file && ['image/jpeg', 'image/png'].includes(file.type)) {
-    setImage(file)
-    setPreview(URL.createObjectURL(file))
+    if (!file) return
+    changeImage()
+    if (!['image/jpeg', 'image/png'].includes(file.type)) {
+      setError('Selecciona una imagen JPG o PNG.')
+    } else if (!file.size || file.size > maxImageBytes) {
+      setError('Selecciona una imagen con contenido de hasta 10 MiB.')
+    } else {
+      setImage(file)
+      setPreview(URL.createObjectURL(file))
+    }
   }
-}
 
-const handleImageChange = (event) => {
-  handleFile(event.target.files[0])
-}
+  const handleImageChange = (event) => {
+    handleFile(event.target.files[0])
+    event.target.value = ''
+  }
 
-const handleDrop = (event) => {
-  event.preventDefault()
-  handleFile(event.dataTransfer.files[0])
-}
+  const handleDrop = (event) => {
+    event.preventDefault()
+    handleFile(event.dataTransfer.files[0])
+  }
+
+  const analyzeImage = async () => {
+    if (!image || activeRequest.current) return
+    const request = new AbortController()
+    activeRequest.current = request
+    setLoading(true)
+    setError('')
+    setResult(null)
+    const timeout = window.setTimeout(() => request.abort(), 60_000)
+    try {
+      const response = await fetch('/api/analyze', {
+        method: 'POST',
+        headers: { 'Content-Type': image.type },
+        body: image,
+        cache: 'no-store',
+        signal: request.signal,
+      })
+      const data = response.headers.get('content-type')?.includes('application/json') ? await response.json() : null
+      if (activeRequest.current !== request) return
+      if (response.ok && data) {
+        setResult(data)
+      } else {
+        setError(typeof data?.detail === 'string' ? data.detail : connectionError)
+      }
+    } catch {
+      if (activeRequest.current === request) {
+        setError(request.signal.aborted ? 'El análisis tardó demasiado. Intenta nuevamente.' : connectionError)
+      }
+    } finally {
+      window.clearTimeout(timeout)
+      if (activeRequest.current === request) {
+        activeRequest.current = null
+        setLoading(false)
+      }
+    }
+  }
 
   return (
     <main className="app">
@@ -52,10 +118,10 @@ const handleDrop = (event) => {
           </div>
 
           <label
-  className="upload-area"
-  onDragOver={(event) => event.preventDefault()}
-  onDrop={handleDrop}
->
+            className="upload-area"
+            onDragOver={(event) => event.preventDefault()}
+            onDrop={handleDrop}
+          >
             {preview ? (
               <img src={preview} alt="Vista previa del fondo de ojo" />
             ) : (
@@ -63,53 +129,70 @@ const handleDrop = (event) => {
                 <span className="upload-icon">↑</span>
                 <strong>Arrastra tu imagen aquí</strong>
                 <span>o haz clic para buscarla en tu equipo</span>
-                <small>Formatos admitidos: JPG y PNG</small>
+                <small>Formatos admitidos: JPG y PNG · Hasta 10 MiB</small>
               </>
             )}
 
             <input
               type="file"
+              aria-label="Seleccionar imagen de fondo de ojo"
               accept="image/png, image/jpeg"
               onChange={handleImageChange}
             />
           </label>
 
           {image && (
-  <div className="file-info">
-    <p className="file-name">
-      Imagen seleccionada: {image.name}
-    </p>
+            <div className="file-info">
+              <p className="file-name">Imagen seleccionada: {image.name}</p>
+              <button type="button" className="change-image" onClick={changeImage}>
+                Cambiar imagen
+              </button>
+            </div>
+          )}
 
-    <button
-      className="change-image"
-      onClick={() => {
-        setImage(null)
-        setPreview(null)
-      }}
-    >
-      Cambiar imagen
-    </button>
-  </div>
-)}
-
-          <button className="analyze-button" disabled={!image}>
-            Analizar imagen
+          <button type="button" className="analyze-button" disabled={!image || loading} onClick={analyzeImage}>
+            {loading ? 'Analizando imagen…' : 'Analizar imagen'}
           </button>
+          {error && <p className="analysis-error" role="alert">{error}</p>}
 
           <p className="disclaimer">
             Esta herramienta tiene fines académicos y experimentales.
-            No sustituye una valoración médica profesional.
+            No ofrece un diagnóstico médico. El modelo puede producir falsos positivos y falsos negativos.
           </p>
-          <div className="result-placeholder">
-            <div className="result-icon">✦</div>
-
-            <h3>Tu resultado aparecerá aquí</h3>
-
-            <p>
-              Una vez analizada la imagen, podrás consultar
-              la clasificación y la probabilidad estimada
-              por nuestro modelo.
-            </p>
+          <div className="result-placeholder" aria-busy={loading}>
+            <div className="result-icon" aria-hidden="true">✦</div>
+            <div role="status">
+              <h3>{result ? 'Resultado experimental' : 'Tu resultado aparecerá aquí'}</h3>
+              {result ? (
+                <>
+                  <p>Clase asignada por el modelo: <strong>{result.label === 1 ? 'Glaucoma' : 'Sano'}</strong></p>
+                  <p>Puntaje experimental de glaucoma: <strong>{scoreFormat.format(result.score_glaucoma)}</strong></p>
+                  <p>Escala de 0 a 1 sin calibración clínica. Umbral: {result.threshold.toLocaleString('es-CO')}.</p>
+                </>
+              ) : (
+                <p>{loading ? 'Generando el puntaje y Grad-CAM…' : 'Consulta la clasificación, el puntaje experimental y el mapa Grad-CAM.'}</p>
+              )}
+            </div>
+            {result && (
+              <>
+                <div className="result-images">
+                  <figure>
+                    <img src={preview} alt="Imagen original del fondo de ojo" />
+                    <figcaption>Imagen original</figcaption>
+                  </figure>
+                  <figure>
+                    <img src={'data:image/png;base64,' + result.overlay_png} alt="Grad-CAM superpuesto sobre la imagen original" />
+                    <figcaption>Superposición</figcaption>
+                  </figure>
+                  <figure>
+                    <img src={'data:image/png;base64,' + result.heatmap_png} alt="Mapa de calor Grad-CAM del logit de glaucoma" />
+                    <figcaption>Mapa de calor Grad-CAM</figcaption>
+                  </figure>
+                </div>
+                {!result.has_signal && <p>El mapa es uniforme para esta imagen.</p>}
+                <p>Grad-CAM resalta regiones asociadas al puntaje del modelo y no garantiza localizar estructuras médicamente relevantes.</p>
+              </>
+            )}
           </div>
         </section>
       </section>

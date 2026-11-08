@@ -131,13 +131,17 @@ button, input {
   color: #426d81;
 }
 
-.upload-area:hover {
+.upload-area:hover,
+.upload-area:focus-within {
   background: #edf7fa;
   border-color: #5b9ab4;
 }
 
 .upload-area input {
-  display: none;
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  opacity: 0;
 }
 
 .upload-area img {
@@ -145,6 +149,7 @@ button, input {
   max-height: 260px;
   object-fit: contain;
   border-radius: 12px;
+  background: #000;
 }
 
 .upload-icon {
@@ -237,4 +242,44 @@ button, input {
   color: #8297a1;
   font-size: 13px;
   line-height: 1.7;
+}
+
+.analysis-error {
+  margin-top: 12px;
+  padding: 10px 14px;
+  border-radius: 12px;
+  background: #fff3f2;
+  color: #923732;
+  font-size: 14px;
+}
+
+.result-images {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+  margin: 16px 0;
+}
+
+.result-images figure {
+  min-width: 0;
+  margin: 0;
+}
+
+.result-images figure:last-child {
+  grid-column: 1 / -1;
+  width: 50%;
+  justify-self: center;
+}
+
+.result-images img {
+  display: block;
+  width: 100%;
+  border-radius: 12px;
+  background: #000;
+}
+
+.result-images figcaption {
+  margin-top: 4px;
+  color: #426d81;
+  font-size: 13px;
 }

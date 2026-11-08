@@ -23,15 +23,21 @@ def checkpoint_transform(checkpoint: dict):
     )
 
 
-def predict_image(checkpoint_path: Path, image_path: Path, device: torch.device | str = "cpu") -> dict:
-    model, checkpoint = load_checkpoint(checkpoint_path, device)
-    transform = checkpoint_transform(checkpoint)
-    with Image.open(image_path) as image:
-        pixels = transform(image.convert("RGB")).unsqueeze(0).to(device)
-    with torch.inference_mode():
+@torch.inference_mode()
+def score_image(model, image: Image.Image, transform, device: torch.device | str) -> float:
+    device = torch.device(device)
+    pixels = transform(image.convert("RGB")).unsqueeze(0).to(device)
+    with torch.autocast(device.type, enabled=False):
         score = torch.sigmoid(model(pixels)).item()
     if not math.isfinite(score):
         raise ValueError("El checkpoint produjo un puntaje no finito.")
+    return score
+
+
+def predict_image(checkpoint_path: Path, image_path: Path, device: torch.device | str = "cpu") -> dict:
+    model, checkpoint = load_checkpoint(checkpoint_path, device)
+    with Image.open(image_path) as image:
+        score = score_image(model, image, checkpoint_transform(checkpoint), device)
     threshold = checkpoint["config"]["threshold"]
     label = int(score >= threshold)
     return {"score_glaucoma": score, "threshold": threshold, "label": label,

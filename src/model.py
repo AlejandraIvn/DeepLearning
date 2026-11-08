@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+from typing import BinaryIO
 
 import torch
 from torch import nn
@@ -34,7 +35,7 @@ class PapilaCNN(nn.Module):
         return self.fc_out(self.dropout(features)).squeeze(1)
 
 
-def read_checkpoint(path: Path) -> dict:
+def read_checkpoint(path: Path | BinaryIO) -> dict:
     """Read weights and primitive metadata with CPU mapping for portability."""
     checkpoint = torch.load(path, map_location="cpu", weights_only=True)
     if (
@@ -47,7 +48,9 @@ def read_checkpoint(path: Path) -> dict:
     return checkpoint
 
 
-def load_checkpoint(path: Path, device: torch.device | str = "cpu") -> tuple[PapilaCNN | PapilaResNet18, dict]:
+def load_checkpoint(
+    path: Path | BinaryIO, device: torch.device | str = "cpu",
+) -> tuple[PapilaCNN | PapilaResNet18, dict]:
     """Restore a model in evaluation mode without downloading initial weights."""
     checkpoint = read_checkpoint(path)
     architecture = checkpoint["architecture"]

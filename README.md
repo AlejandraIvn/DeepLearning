@@ -155,6 +155,59 @@ Los intervalos exploratorios del 95 % usan 5.000 remuestreos percentiles por pac
 
 PAPILA test se consultó en experimentos históricos. Esta evaluación es interna y exploratoria. Las decisiones de modelo, umbral y preprocesamiento se fijaron en validación antes de ejecutarla. Los resultados describen puntajes académicos sin calibrar.
 
+## Grad-CAM de ResNet18 en validación
+
+La capa objetivo es `model.backbone.layer4[-1]`. Para cada imagen se deriva el logit de glaucoma respecto a las activaciones `512 × 7 × 7`. Se promedian espacialmente los gradientes, se ponderan los canales y se aplica ReLU. El mapa se interpola a `224 × 224`, se recorta con la geometría exacta del letterbox y se normaliza dentro del contenido antes de reescalarlo al tamaño nativo. Cada mapa tiene su propia escala relativa. [Método Grad-CAM](https://openaccess.thecvf.com/content_iccv_2017/html/Selvaraju_Grad-CAM_Visual_Explanations_ICCV_2017_paper.html)
+
+```powershell
+.\.venv\Scripts\python.exe -m unittest discover -s tests -v
+.\.venv\Scripts\python.exe -m src.explain_validation --dataset-dir path/to/PAPILA --manifest path/to/manifest-c.csv
+```
+
+El comando verifica el manifiesto, el inventario de validación y los hashes de los checkpoints disponibles. Clasifica las imágenes de validación en CPU con el umbral congelado `0.35` y toma el primer `image_id` de cada categoría en orden lexicográfico. Luego genera Grad-CAM en CPU y, si hay CUDA, repite la comprobación en GPU con autocast y TF32 desactivados para la medición. `--cpu` limita la ejecución a CPU. `--alpha` controla la opacidad máxima, con valor predeterminado `0.55`.
+
+La carpeta local `models/runs/papila-grad-cam/` contiene las figuras, los mapas nativos `.npy` y `report.json` con los IDs, las categorías ausentes, los puntajes, las mediciones y los hashes de entrada y salida. La variante `--cpu` usa `models/runs/papila-grad-cam-cpu/`. Cada variante requiere que su carpeta de salida aún no exista. `models/runs/` está excluida de Git. La medición por imagen incluye preprocesamiento, cálculo, interpolación y transferencia del mapa a CPU. La decodificación JPEG y el guardado de archivos se realizan aparte. El pico de CUDA registra memoria asignada por PyTorch, incluyendo el modelo residente.
+
+Para una integración futura, `src.explain.explain_image(model, image, checkpoint, threshold=0.35)` acepta una imagen Pillow y el modelo en `eval()` cargado por `load_checkpoint`. Devuelve el puntaje académico sin calibrar, la clase, la caja del contenido y un tensor FP32 en CPU indexado como `(y, x)` en la imagen original. Ejecuta esta función fuera de `torch.inference_mode()`. `src.explain_visualization.overlay_png(image, result.heatmap, alpha=0.55)` devuelve los bytes PNG a resolución nativa.
+
+`summarize_regions` acepta máscaras booleanas alineadas y devuelve la fracción de área, la fracción de masa Grad-CAM y su cociente. El informe incluye dos referencias geométricas para orientar la inspección de artefactos, la franja exterior del 10 % por eje y los píxeles originales con máximo RGB ≤ 20. Para evaluar disco, vasos o artefactos específicos hacen falta máscaras verificadas. PAPILA publica contornos de disco y copa de dos expertos como coordenadas de la imagen original, enlazables por ID y ojo. Para una comparación posterior se pueden rasterizar por experto y revisar visualmente su registro con cada JPEG antes de medir solapamiento. [Artículo de PAPILA](https://pmc.ncbi.nlm.nih.gov/articles/PMC9184612/)
+
+La cuadrícula de `7 × 7` solo permite interpretar patrones espaciales gruesos. Las figuras muestran evidencia positiva relativa para el logit de glaucoma incluso en predicciones negativas. Cuatro ejemplos permiten formular hipótesis visuales. Las superposiciones por sí solas carecen de alcance causal y diagnóstico.
+
+## GlaucoAI con FastAPI y Grad-CAM
+
+`frontend/` contiene la pantalla React y Vite de GlaucoAI. Su selector, arrastre, vista previa y botón de cambio de imagen se reutilizan. La tarjeta original muestra el resultado experimental y las tres imágenes comparables. El navegador envía el JPG o PNG una sola vez a `/api/analyze` mediante el proxy local de Vite.
+
+En PowerShell, desde la raíz, instala las dependencias sobre el entorno con PyTorch y torchvision ya configurados y arranca el backend:
+
+```powershell
+.\.venv\Scripts\python.exe -m pip install -r requirements-backend.txt
+.\.venv\Scripts\python.exe -m uvicorn backend.main:app --host 127.0.0.1 --port 8000 --no-access-log
+```
+
+Coloca el checkpoint congelado en `models/runs/papila-resnet18/best.pt`. FastAPI valida su SHA-256 y carga una instancia por proceso. Prefiere CUDA si PyTorch la detecta. Para forzar CPU, ejecuta `$env:GLAUCOAI_CPU = '1'` en la misma terminal antes de arrancar el servidor. Usa un solo proceso para compartir el modelo y serializar los análisis.
+
+En otra terminal, desde la raíz:
+
+```powershell
+Set-Location frontend
+npm.cmd ci
+npm.cmd run dev -- --host 127.0.0.1 --strictPort
+```
+
+Abre `http://127.0.0.1:5173/`. `http://127.0.0.1:8000/health` muestra el estado del modelo y su dispositivo. La compilación con `npm.cmd run build` usa la misma ruta relativa `/api/`. Si sirves `dist/` fuera de Vite, configura el proxy del sitio para reenviar `/api/*` a FastAPI sin el prefijo `/api`.
+
+| Ruta de FastAPI | Respuesta |
+|---|---|
+| `GET /health` | Estado del modelo, dispositivo y umbral. Devuelve `503` si el modelo no pudo cargarse. |
+| `POST /predict` | Puntaje experimental en `[0, 1]`, etiqueta, clase y umbral `0.35`. |
+| `POST /explain` | PNG del mapa y de la superposición en Base64, capa objetivo e indicador de señal. |
+| `POST /analyze` | Predicción y explicación con una sola pasada del modelo. |
+
+Los POST aceptan directamente los bytes con `Content-Type: image/jpeg` o `image/png`. La API limita la carga a 10 MiB, 6 megapíxeles y 4096 píxeles por lado, y verifica que la imagen se pueda decodificar. Normaliza la orientación EXIF para que coincida con la vista del navegador. Los PNG de respuesta tienen hasta 1024 píxeles en su lado más largo. Las imágenes se procesan en memoria y las respuestas de análisis usan `Cache-Control: no-store`.
+
+Para verificar el proyecto desde la raíz, ejecuta `.\.venv\Scripts\python.exe -m unittest discover -s tests -v`. En `frontend/`, ejecuta `npm.cmd run lint` y `npm.cmd run build`.
+
 ## Metodología
 1. **Modelo base:** CNN con 2 bloques Conv2D (32 y 64 filtros, 3×3) + ReLU + MaxPool, capa densa de 128 unidades y salida sigmoide. Pérdida BCE y optimizador Adam (lr = 1e-3).
 2. **Diagnóstico:** el modelo base presenta sobreajuste (la pérdida de entrenamiento baja mientras la de validación se mantiene fluctuante).
