@@ -1,6 +1,6 @@
-# Detección de glaucoma en imágenes de fondo de ojo
+# GlaucoAI
 
-Sistema de clasificación de imágenes de fondo de ojo para estimar si hay glaucoma, con probabilidad asociada a cada predicción. Incluye el análisis experimental de hiperparámetros, el modelo final y una interfaz web para subir imágenes y ver el resultado.
+GlaucoAI es una demostración académica local que clasifica imágenes de fondo de ojo con ResNet18. La interfaz React muestra la clase, el puntaje experimental sin calibrar y un mapa Grad-CAM. El proyecto incluye una CNN de referencia, experimentos históricos de hiperparámetros y un protocolo reproducible de evaluación interna con PAPILA.
 
 > **Aviso:** proyecto académico/educativo. No es un instrumento de diagnóstico clínico.
 
@@ -11,15 +11,14 @@ Sistema de clasificación de imágenes de fondo de ojo para estimar si hay glauc
 - [Entrenamiento de la CNN e inferencia local](#entrenamiento-de-la-cnn-e-inferencia-local)
 - [Transfer Learning con ResNet18](#transfer-learning-con-resnet18)
 - [Evaluación interna congelada de PAPILA](#evaluación-interna-congelada-de-papila)
-- [Metodología](#metodología)
-- [Resultados](#resultados)
-- [Modelo final](#modelo-final)
+- [Grad-CAM de ResNet18 en validación](#grad-cam-de-resnet18-en-validación)
+- [Instalación y uso en Windows](#instalación-y-uso-en-windows)
+- [Experimentos históricos del notebook](#experimentos-históricos-del-notebook)
 - [Estructura del repositorio](#estructura-del-repositorio)
-- [Instalación y uso](#instalación-y-uso)
 - [Limitaciones](#limitaciones)
 
 ## Dataset
-Se usa el dataset PAPILA (repositorio fuente: https://github.com/valentinaache/glaucomaPGUSab).
+PAPILA reúne imágenes de ambos ojos de 244 pacientes, datos clínicos y contornos de disco y copa. La tabla siguiente describe la partición del notebook histórico. El manifiesto congelado de la evaluación reproducible usa 274 imágenes de entrenamiento, 62 de validación y 84 de test. [Artículo de PAPILA](https://doi.org/10.1038/s41597-022-01388-1)
 
 - 488 imágenes en total; se excluye la clase *sospechoso*, quedan **420 imágenes**.
 - 210 pacientes, con ambos ojos (OD y OS).
@@ -141,13 +140,14 @@ Un experimento posterior de ajuste parcial podría descongelar `layer4` con un l
 
 `configs/papila-internal-test.json` fija checkpoints, preprocesamiento, dependencias, umbrales e identidades SHA-256 del manifiesto y las imágenes de cada split. ResNet18, época 18, se evalúa a `0.35`. La CNN de referencia, época 8, se evalúa a `0.50`. Su umbral exploratorio de validación `0.55` se conserva como antecedente. Los resultados de validación en los umbrales aplicados se copiaron del informe de comparación previo, identificado por su hash.
 
-Desde la raíz, en PowerShell, indica la copia local de PAPILA y el manifiesto congelado:
+Resultados ya registrados en el informe interno, en los mismos umbrales congelados. La validación sirvió para comparar modelos y fijar decisiones. El test interno tiene carácter exploratorio por su consulta histórica.
 
-```powershell
-.\.venv\Scripts\python.exe -m unittest discover -s tests -v
-.\.venv\Scripts\python.exe -m src.internal_test --dataset-dir data/papila --manifest data/papila_manifest.csv --preflight
-.\.venv\Scripts\python.exe -m src.internal_test --dataset-dir data/papila --manifest data/papila_manifest.csv --confirm-internal-test
-```
+| Partición | Modelo | Umbral | Exactitud | Sensibilidad | Especificidad | ROC-AUC |
+|---|---|---:|---:|---:|---:|---:|
+| Validación (62) | CNN | 0,50 | 79,03 % | 38,46 % | 89,80 % | 0,7394 |
+| Validación (62) | ResNet18 | 0,35 | 88,71 % | 69,23 % | 93,88 % | 0,8587 |
+| Test interno (84) | CNN | 0,50 | 79,76 % | 47,06 % | 88,06 % | 0,7155 |
+| Test interno (84) | ResNet18 | 0,35 | 82,14 % | 35,29 % | 94,03 % | 0,7954 |
 
 El preflight verifica bytes y particiones y prueba ambos modelos con tensores sintéticos. La confirmación explícita ejecuta una pasada por checkpoint en test, en FP32 y modo inferencia. Comprueba que los parámetros y buffers conservan su hash. La carpeta local `models/runs/papila-internal-test/` se reserva antes de abrir el primer JPEG de test y su existencia bloquea otra ejecución. Guarda la configuración, métricas, predicciones por ojo agrupadas también por paciente, matrices, curvas e información de reproducibilidad. Los artefactos quedan fuera de Git.
 
@@ -174,41 +174,77 @@ Para una integración futura, `src.explain.explain_image(model, image, checkpoin
 
 La cuadrícula de `7 × 7` solo permite interpretar patrones espaciales gruesos. Las figuras muestran evidencia positiva relativa para el logit de glaucoma incluso en predicciones negativas. Cuatro ejemplos permiten formular hipótesis visuales. Las superposiciones por sí solas carecen de alcance causal y diagnóstico.
 
-## GlaucoAI con FastAPI y Grad-CAM
+## Instalación y uso en Windows
 
-`frontend/` contiene la pantalla React y Vite de GlaucoAI. Su selector, arrastre, vista previa y botón de cambio de imagen se reutilizan. La tarjeta original muestra el resultado experimental y las tres imágenes comparables. El navegador envía el JPG o PNG una sola vez a `/api/analyze` mediante el proxy local de Vite.
+La demo usa React 19 compilado con Vite 8, FastAPI sobre Uvicorn y PyTorch/torchvision para inferencia y Grad-CAM. FastAPI sirve la interfaz, sus recursos estáticos y `/api/*` desde `127.0.0.1`, en un solo proceso. El navegador envía la imagen a `/api/analyze` en el mismo origen. Nunito se sirve desde el build local y la política de contenido de la interfaz restringe scripts, estilos y fuentes al mismo origen. La demo arranca con el modelo cargado y verificado, y conserva las rutas API sin prefijo para clientes anteriores.
 
-En PowerShell, desde la raíz, instala las dependencias sobre el entorno con PyTorch y torchvision ya configurados y arranca el backend:
+### Instalación inicial
+
+Usa Windows de 64 bits, Python 3.14 y Node.js 24 para compilar. La demo funciona en CPU. Para CUDA, usa una GPU NVIDIA con controlador compatible y las ruedas `cu130`. La configuración se verificó con Intel Core i5-12450H y NVIDIA RTX 4050 Laptop de 6 GB. Node.js se usa para compilar el frontend. [Ruedas oficiales de PyTorch 2.14.1](https://pytorch.org/get-started/previous-versions/#v2141)
 
 ```powershell
+py -3.14 -m venv .venv
+.\.venv\Scripts\python.exe -m pip install torch==2.14.1 torchvision==0.29.1 --index-url https://download.pytorch.org/whl/cu130
 .\.venv\Scripts\python.exe -m pip install -r requirements-backend.txt
-.\.venv\Scripts\python.exe -m uvicorn backend.main:app --host 127.0.0.1 --port 8000 --no-access-log
+npm.cmd --prefix frontend ci
+npm.cmd --prefix frontend run build
 ```
 
-Coloca el checkpoint congelado en `models/runs/papila-resnet18/best.pt`. FastAPI valida su SHA-256 y carga una instancia por proceso. Prefiere CUDA si PyTorch la detecta. Para forzar CPU, ejecuta `$env:GLAUCOAI_CPU = '1'` en la misma terminal antes de arrancar el servidor. Usa un solo proceso para compartir el modelo y serializar los análisis.
+Para una instalación solo CPU, usa `https://download.pytorch.org/whl/cpu` como índice en el comando de PyTorch. Coloca tu copia autorizada del checkpoint congelado en `models/runs/papila-resnet18/best.pt`. El SHA-256 esperado es `721699061b8f0489b77d3f2ce19bccd0d6468a396fc315d1d112ef41c154b761`. Para preparar otra máquina lleva el código y, opcionalmente, `frontend/dist/` ya compilado. Prepara allí el entorno Python y la copia autorizada del checkpoint. La demo acepta una imagen elegida localmente durante la presentación.
 
-En otra terminal, desde la raíz:
+### Arranque con un comando
 
 ```powershell
-Set-Location frontend
-npm.cmd ci
-npm.cmd run dev -- --host 127.0.0.1 --strictPort
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\Start-GlaucoAI.ps1
 ```
 
-Abre `http://127.0.0.1:5173/`. `http://127.0.0.1:8000/health` muestra el estado del modelo y su dispositivo. La compilación con `npm.cmd run build` usa la misma ruta relativa `/api/`. Si sirves `dist/` fuera de Vite, configura el proxy del sitio para reenviar `/api/*` a FastAPI sin el prefijo `/api`.
+Desde la raíz, ejecuta el comando y abre [GlaucoAI](http://127.0.0.1:8000/) cuando Uvicorn anuncie la dirección. El script comprueba `.venv`, importa las dependencias, requiere el build y verifica el checkpoint antes de abrir el puerto. Añade `-Cpu` para forzar CPU o `-Port 8001` para elegir otro puerto local. El proceso usa las dependencias ya instaladas. Para detenerlo, pulsa `Ctrl+C`.
 
 | Ruta de FastAPI | Respuesta |
 |---|---|
-| `GET /health` | Estado del modelo, dispositivo y umbral. Devuelve `503` si el modelo no pudo cargarse. |
-| `POST /predict` | Puntaje experimental en `[0, 1]`, etiqueta, clase y umbral `0.35`. |
-| `POST /explain` | PNG del mapa y de la superposición en Base64, capa objetivo e indicador de señal. |
-| `POST /analyze` | Predicción y explicación con una sola pasada del modelo. |
+| `GET /api/health` | Estado del modelo, dispositivo y umbral. En desarrollo devuelve `503` si el modelo no pudo cargarse. |
+| `POST /api/predict` | Puntaje experimental en `[0, 1]`, etiqueta, clase y umbral `0.35`. |
+| `POST /api/explain` | PNG del mapa y de la superposición en Base64, capa objetivo e indicador de señal. |
+| `POST /api/analyze` | Predicción y explicación con una sola pasada del modelo. |
 
-Los POST aceptan directamente los bytes con `Content-Type: image/jpeg` o `image/png`. La API limita la carga a 10 MiB, 6 megapíxeles y 4096 píxeles por lado, y verifica que la imagen se pueda decodificar. Normaliza la orientación EXIF para que coincida con la vista del navegador. Los PNG de respuesta tienen hasta 1024 píxeles en su lado más largo. Las imágenes se procesan en memoria y las respuestas de análisis usan `Cache-Control: no-store`.
+Los POST reciben bytes con `Content-Type: image/jpeg` o `image/png`. El límite es 10 MiB, 6 megapíxeles, 4096 píxeles por lado y 15 segundos para recibir el cuerpo. Se valida la decodificación y se normaliza la orientación EXIF. Hasta dos cargas pueden estar en procesamiento o espera con el cuerpo en memoria. Un solo hilo ejecuta el modelo, aísla sus hooks y reutiliza la memoria temporal de CUDA. Los PNG de respuesta tienen hasta 1024 píxeles en su lado más largo. Las imágenes se procesan en memoria, el registro de acceso se deshabilita en la demo y las respuestas de análisis usan `Cache-Control: no-store`.
 
-Para verificar el proyecto desde la raíz, ejecuta `.\.venv\Scripts\python.exe -m unittest discover -s tests -v`. En `frontend/`, ejecuta `npm.cmd run lint` y `npm.cmd run build`.
+### Desarrollo y verificación
 
-## Metodología
+En desarrollo, ejecuta los siguientes comandos en terminales separadas. Vite reenvía `/api/` al backend local. Usa `npm.cmd --prefix frontend run build` para actualizar el build distribuible después de cambiar el frontend.
+
+```powershell
+.\.venv\Scripts\python.exe -m uvicorn backend.main:app --host 127.0.0.1 --port 8000 --no-access-log
+npm.cmd --prefix frontend run dev -- --host 127.0.0.1 --strictPort
+```
+
+```powershell
+.\.venv\Scripts\python.exe -m pip install -r requirements-test.txt
+.\.venv\Scripts\python.exe -m unittest discover -s tests -v
+npm.cmd --prefix frontend run lint
+npm.cmd --prefix frontend run build
+```
+
+Para reproducir la medición, usa el manifiesto congelado y una copia local de PAPILA. Añade `--cpu` para medir en CPU.
+
+```powershell
+.\.venv\Scripts\python.exe -m scripts.benchmark_demo --dataset-dir path/to/PAPILA --manifest path/to/manifest-c.csv --image-id RET013OD --image-id RET033OD --samples 12
+```
+
+El script verifica el manifiesto y los pesos. Mide la API ASGI en proceso después de calentar el modelo, salvo la carga inicial. Las cifras de respuesta incluyen decodificación y serialización. Los promedios corresponden a 12 solicitudes por fase en el equipo de referencia.
+
+| Dispositivo | Carga inicial | Inferencia FP32 | Grad-CAM FP32 | Respuesta `/api/analyze` | Respuesta con dos clientes |
+|---|---:|---:|---:|---:|---:|
+| CPU, 8 hilos | 152 ms | 35 ms | 51 ms | 282 ms | 541 ms |
+| RTX 4050 Laptop | 731 ms | 19 ms | 29 ms | 243 ms | 468 ms |
+
+En CUDA, el pico fue de 106,46 MiB asignados y 132 MiB reservados. Después de las tandas consecutiva y concurrente quedaron 58,94 MiB asignados, igual que tras el calentamiento. Los 132 MiB reservados incluyen la caché del asignador de PyTorch.
+
+Auditoría npm del 8 de noviembre de 2026. Producción reporta cero hallazgos. Desarrollo reporta cuatro entradas moderadas asociadas al mismo aviso de `minimatch` 10.2.6. `eslint` y `@eslint/config-array` requieren la rama 10 y `@eslint/js` tiene a `eslint` como par opcional. El parche publicado, 11.0.1, queda fuera de esos rangos. Queda pendiente una versión compatible de la cadena de lint. [Aviso GHSA-g3hv-75wg-m249](https://github.com/advisories/GHSA-g3hv-75wg-m249)
+
+## Experimentos históricos del notebook
+
+### Metodología histórica
 1. **Modelo base:** CNN con 2 bloques Conv2D (32 y 64 filtros, 3×3) + ReLU + MaxPool, capa densa de 128 unidades y salida sigmoide. Pérdida BCE y optimizador Adam (lr = 1e-3).
 2. **Diagnóstico:** el modelo base presenta sobreajuste (la pérdida de entrenamiento baja mientras la de validación se mantiene fluctuante).
 3. **Barridos de hiperparámetros**, uno a la vez:
@@ -220,7 +256,7 @@ Para verificar el proyecto desde la raíz, ejecuta `.\.venv\Scripts\python.exe -
 4. **Diseño factorial completo:** 4 factores binarios × 3 optimizadores = 48 configuraciones.
 5. **Selección por Val Loss.** El conjunto de test se usa solo para el reporte final.
 
-## Resultados
+### Resultados históricos
 Métricas sobre el conjunto de **test (84 imágenes)**, clase positiva = glaucoma, umbral 0.5:
 
 | Modelo | Accuracy | Precision | Recall | F1 | ROC-AUC |
@@ -233,32 +269,32 @@ Matriz de confusión del modelo final: 10 de 17 glaucomas detectados (7 falsos n
 
 Se prioriza el **recall**, porque un falso negativo (glaucoma no detectado) es más costoso que un falso positivo.
 
-## Modelo final
+### CNN final del notebook histórico
 - Arquitectura: CNN de la sección *Metodología*, entrada 96 × 96 × 3.
 - Optimizador: Adam, lr = 1e-3.
 - Regularización: augmentation Leve (flip horizontal, rotación ±10°, jitter de brillo y contraste), early stopping con paciencia 5. Sin L2 ni Dropout.
-- Salida: probabilidad de glaucoma en [0, 1] y clase según umbral.
-
-<!-- Completar cuando esté el modelo YOLO: arquitectura, lr, épocas, métricas y motivo de elección -->
+- Salida: puntaje de glaucoma en [0, 1] y clase según umbral.
 
 ## Estructura del repositorio
 ```
 ├── notebooks/        # experimentos (barridos, factorial, métricas)
 ├── src/              # datos, modelo, entrenamiento y evaluación
-├── models/           # pesos exportados del modelo final
-├── backend/          # API de inferencia
-├── frontend/         # interfaz web
+├── models/           # checkpoints y resultados locales
+├── configs/          # protocolo y hashes congelados
+├── backend/          # FastAPI, servicio del build e inicio local
+├── frontend/         # aplicación React y build generado por Vite
+├── scripts/          # medición reproducible de la demo
+├── tests/            # pruebas de modelos, datos e integración
+├── Start-GlaucoAI.ps1
 └── README.md
 ```
-
-## Instalación y uso
-<!-- Completar cuando estén listos backend y frontend -->
 
 ## Limitaciones
 - El conjunto de test tiene solo 84 imágenes (17 con glaucoma). Una diferencia de un caso cambia el recall aproximadamente 6 puntos, así que las comparaciones entre modelos son orientativas.
 - Un único split. No se usó validación cruzada.
-- La resolución de 96 × 96 px puede perder detalles finos del disco óptico.
-- Resultados de investigación; no reemplazan la evaluación de un especialista.
+- La CNN histórica usa 96 × 96 px. ResNet18 usa 224 × 224 px y su Grad-CAM parte de una cuadrícula de 7 × 7.
+- Los puntajes son experimentales, pueden producir falsos positivos y negativos, y carecen de calibración y validación clínica. Los ejemplos Grad-CAM son ilustrativos.
+- La demo se limita a localhost. Su uso en red requeriría autenticación, protección del tráfico y una revisión de privacidad y seguridad.
 
 ## Licencia y créditos
-<!-- Completar: licencia y cita del dataset PAPILA -->
+PAPILA se cita como Kovalyk et al., *Scientific Data* 9, 291 (2022). Figshare indica GPL 3.0+ para su versión 2. La fuente Nunito se distribuye con su aviso SIL OFL 1.1. [Artículo de PAPILA](https://doi.org/10.1038/s41597-022-01388-1) · [Depósito y licencia de PAPILA](https://figshare.com/articles/dataset/PAPILA/14798004) · [Licencia de Nunito](frontend/public/OFL-Nunito.txt)

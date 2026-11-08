@@ -1,6 +1,5 @@
--r requirements-data.txt
--r requirements-training.txt
+Pillow==12.3.0
+matplotlib==3.11.2
 fastapi==0.162.2
 starlette==1.10.0
 uvicorn==0.54.0
-httpx2==2.16.0

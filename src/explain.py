@@ -24,7 +24,7 @@ class GradCAMResult:
     score_glaucoma: float
     label: int
     threshold: float
-    heatmap: torch.Tensor  # Detached CPU tensor indexed by original (y, x).
+    heatmap: torch.Tensor  # Detached CPU tensor indexed by (y, x).
     content_box: tuple[int, int, int, int]  # Left, top, right, bottom (exclusive).
     feature_shape: tuple[int, int]
 
@@ -78,11 +78,13 @@ def align_heatmap(
 
 def explain_image(
     model: PapilaResNet18, image: Image.Image, checkpoint: dict, *, threshold: float,
+    output_size: tuple[int, int] | None = None,
 ) -> GradCAMResult:
     """Explain glaucoma evidence, including for images classified as negative.
 
     Pass a loaded FP32 model in eval mode and the chosen threshold explicitly.
-    The return value owns no graph or GPU storage.
+    The detached CPU map defaults to the original size. Pass the dimensions
+    of a full-image preview to project directly onto its display pixels.
     """
     if torch.is_inference_mode_enabled():
         raise RuntimeError("Grad-CAM requiere ejecutar fuera de torch.inference_mode().")
@@ -99,7 +101,7 @@ def explain_image(
     image_size = checkpoint["architecture"]["image_size"]
     box = letterbox_content_box(image.size, image_size)
     transform = checkpoint_transform(checkpoint)
-    pixels = transform(image.convert("RGB")).unsqueeze(0).to(parameter.device)
+    pixels = transform(image if image.mode == "RGB" else image.convert("RGB")).unsqueeze(0).to(parameter.device)
     activation = None
     caller = get_ident()
 
@@ -124,7 +126,7 @@ def explain_image(
         weights = gradients.mean(dim=(-2, -1), keepdim=True)
         feature_map = (weights * activation.detach()).sum(dim=1)[0].relu()
         score = logits.detach().sigmoid().item()
-        aligned = align_heatmap(feature_map, image_size, box, image.size)
+        aligned = align_heatmap(feature_map, image_size, box, output_size if output_size is not None else image.size)
 
     return GradCAMResult(score, int(score >= threshold), threshold, aligned.cpu(), box, tuple(feature_map.shape))
 

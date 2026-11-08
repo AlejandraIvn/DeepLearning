@@ -8,19 +8,21 @@ import hashlib
 import json
 import logging
 import os
-from contextlib import asynccontextmanager
-from dataclasses import dataclass, field
+from concurrent.futures import ThreadPoolExecutor
+from contextlib import asynccontextmanager, closing
+from dataclasses import dataclass
+from functools import partial
 from io import BytesIO
 from pathlib import Path
-from threading import Lock
 
 import torch
-from fastapi import FastAPI, HTTPException, Request, Response
+from fastapi import APIRouter, FastAPI, HTTPException, Request, Response
 from PIL import Image, ImageOps
 from pydantic import BaseModel
-from starlette.concurrency import run_in_threadpool
+from starlette.middleware.trustedhost import TrustedHostMiddleware
 from starlette.requests import ClientDisconnect
 from starlette.responses import JSONResponse
+from starlette.staticfiles import StaticFiles
 
 from src.device import select_device
 from src.explain import TARGET_LAYER, explain_image
@@ -32,6 +34,7 @@ from src.pretrained import PapilaResNet18
 
 ROOT = Path(__file__).resolve().parents[1]
 CONFIG = ROOT / "configs" / "papila-internal-test.json"
+FRONTEND_DIST = ROOT / "frontend" / "dist"
 MAX_UPLOAD_BYTES = 10 * 1024 * 1024
 MAX_PIXELS = 6_000_000
 MAX_SIDE = 4096
@@ -39,6 +42,10 @@ PREVIEW_SIDE = 1024
 UPLOAD_TIMEOUT = 15
 MEDIA_TYPES = {"image/jpeg": "JPEG", "image/png": "PNG"}
 NO_STORE = {"Cache-Control": "no-store"}
+FRONTEND_CSP = (
+    "default-src 'self'; img-src 'self' blob: data:; object-src 'none'; "
+    "base-uri 'none'; frame-ancestors 'none'; form-action 'self'"
+)
 NOT_READY = "El modelo académico no está disponible. Revisa el servidor de análisis."
 logger = logging.getLogger("uvicorn.error")
 
@@ -71,28 +78,29 @@ class ModelService:
     checkpoint: dict
     threshold: float
     device: torch.device
-    lock: Lock = field(default_factory=Lock, repr=False)
 
     def process(self, payload: bytes, image_format: str, *, explain: bool) -> Prediction | Analysis:
-        with self.lock, _decode_image(payload, image_format, self.checkpoint["architecture"]["image_size"]) as image:
+        image_size = self.checkpoint["architecture"]["image_size"]
+        with closing(_decode_image(payload, image_format, image_size)) as image:
             if not explain:
                 score = score_image(self.model, image, checkpoint_transform(self.checkpoint), self.device)
                 label = int(score >= self.threshold)
                 return Prediction(score_glaucoma=score, label=label, classification=CLASSES[label],
                                   threshold=self.threshold)
 
-            result = explain_image(self.model, image, self.checkpoint, threshold=self.threshold)
-            image.thumbnail((PREVIEW_SIDE, PREVIEW_SIDE), Image.Resampling.BILINEAR)
+            return self._explain(image)
+
+    def _explain(self, image: Image.Image) -> Analysis:
+        bounds = (PREVIEW_SIDE, PREVIEW_SIDE) if max(image.size) > PREVIEW_SIDE else image.size
+        with closing(ImageOps.contain(image, bounds, Image.Resampling.BILINEAR)) as preview:
+            result = explain_image(self.model, image, self.checkpoint, threshold=self.threshold,
+                                   output_size=preview.size)
             heatmap = result.heatmap
-            if heatmap.shape != (image.height, image.width):
-                heatmap = torch.nn.functional.interpolate(
-                    heatmap[None, None], size=(image.height, image.width), mode="bilinear", align_corners=False,
-                )[0, 0]
             return Analysis(
                 score_glaucoma=result.score_glaucoma, label=result.label,
                 classification=CLASSES[result.label], threshold=result.threshold,
                 heatmap_png=base64.b64encode(heatmap_png(heatmap)).decode("ascii"),
-                overlay_png=base64.b64encode(overlay_png(image, heatmap)).decode("ascii"),
+                overlay_png=base64.b64encode(overlay_png(preview, heatmap)).decode("ascii"),
                 target_layer=TARGET_LAYER, has_signal=bool(heatmap.any()),
             )
 
@@ -112,6 +120,7 @@ def load_model() -> ModelService:
     if not isinstance(model, PapilaResNet18):
         raise ValueError("Se esperaba un checkpoint ResNet18.")
     model.requires_grad_(False)
+    del checkpoint["state_dict"]  # The loaded model already owns the tensors.
     # Inference uses the frozen evaluation threshold, which is separate from training metadata.
     return ModelService(model, checkpoint, spec["threshold"], device)
 
@@ -124,13 +133,13 @@ def _decode_image(payload: bytes, image_format: str, image_size: int) -> Image.I
                 raise _error(413, "La imagen supera 6 megapíxeles o 4096 píxeles por lado.")
             if getattr(source, "n_frames", 1) != 1 or min(width, height) * image_size < max(width, height):
                 raise _error(422, "Usa una imagen fija de fondo de ojo con proporciones válidas.")
-            oriented = ImageOps.exif_transpose(source)
-            if "A" in oriented.getbands() or "transparency" in oriented.info:
-                rgba = oriented.convert("RGBA")
-                background = Image.new("RGB", rgba.size)
-                background.paste(rgba, mask=rgba.getchannel("A"))
+            ImageOps.exif_transpose(source, in_place=True)
+            if "A" in source.getbands() or "transparency" in source.info:
+                background = Image.new("RGB", source.size)
+                with closing(source.convert("RGBA")) as rgba, closing(rgba.getchannel("A")) as alpha:
+                    background.paste(rgba, mask=alpha)
                 return background
-            return oriented.convert("RGB")
+            return source.convert("RGB")
     except Image.DecompressionBombError:
         raise _error(413, "La imagen supera el límite de píxeles.") from None
     except (OSError, ValueError, SyntaxError):
@@ -167,26 +176,33 @@ async def lifespan(app: FastAPI):
     app.state.slots = asyncio.Semaphore(2)
     try:
         app.state.service = load_model()
+        logger.info("ResNet18 verificada y cargada en %s.", app.state.service.device)
     except FileNotFoundError:
-        logger.error("Falta el checkpoint congelado o su configuración en el repositorio.")
+        logger.error("Falta el checkpoint models/runs/papila-resnet18/best.pt o su configuración.")
     except ValueError as error:
         logger.error("No se pudo verificar el modelo: %s", error)
     except (OSError, RuntimeError, KeyError):
         logger.error("No se pudo cargar el modelo académico.")
-    try:
-        yield
-    finally:
-        app.state.service = None
+    if app.state.demo and app.state.service is None:
+        raise RuntimeError("La demostración requiere el checkpoint congelado y un entorno compatible.")
+    # Keep CUDA work on one thread so its library workspaces can be reused.
+    with ThreadPoolExecutor(max_workers=1, thread_name_prefix="glaucoai") as worker:
+        app.state.worker = worker
+        try:
+            yield
+        finally:
+            app.state.service = None
 
 
-app = FastAPI(title="GlaucoAI · API académica", lifespan=lifespan)
+api = APIRouter()
 
 
-@app.get("/health")
-async def health(request: Request):
+@api.get("/health")
+async def health(request: Request, response: Response):
     service = request.app.state.service
     if service is None:
         return JSONResponse({"status": "unavailable", "model_ready": False}, status_code=503, headers=NO_STORE)
+    response.headers.update(NO_STORE)
     return {"status": "ok", "model_ready": True, "model": "resnet18", "device": str(service.device),
             "threshold": service.threshold}
 
@@ -198,7 +214,9 @@ async def _process(request: Request, *, explain: bool):
     async with request.app.state.slots:
         payload, image_format = await _read_image(request)
         try:
-            result = await run_in_threadpool(service.process, payload, image_format, explain=explain)
+            result = await asyncio.get_running_loop().run_in_executor(
+                request.app.state.worker, partial(service.process, payload, image_format, explain=explain),
+            )
         except (RuntimeError, OSError, ValueError):
             logger.error("Falló el procesamiento de una solicitud de análisis.")
             raise _error(500, "El servidor no pudo procesar la imagen.") from None
@@ -210,19 +228,43 @@ UPLOAD_SCHEMA = {"requestBody": {"required": True, "content": {
 }}}
 
 
-@app.post("/predict", response_model=Prediction, openapi_extra=UPLOAD_SCHEMA)
+@api.post("/predict", response_model=Prediction, openapi_extra=UPLOAD_SCHEMA)
 async def predict(request: Request, response: Response):
     response.headers.update(NO_STORE)
     return await _process(request, explain=False)
 
 
-@app.post("/explain", response_model=Explanation, openapi_extra=UPLOAD_SCHEMA)
+@api.post("/explain", response_model=Explanation, openapi_extra=UPLOAD_SCHEMA)
 async def explain(request: Request, response: Response):
     response.headers.update(NO_STORE)
     return await _process(request, explain=True)
 
 
-@app.post("/analyze", response_model=Analysis, openapi_extra=UPLOAD_SCHEMA)
+@api.post("/analyze", response_model=Analysis, openapi_extra=UPLOAD_SCHEMA)
 async def analyze(request: Request, response: Response):
     response.headers.update(NO_STORE)
     return await _process(request, explain=True)
+
+
+class DemoStaticFiles(StaticFiles):
+    async def get_response(self, path, scope):
+        response = await super().get_response(path, scope)
+        response.headers["Content-Security-Policy"] = FRONTEND_CSP
+        return response
+
+
+def create_app(frontend_dist: Path | None = None) -> FastAPI:
+    app = FastAPI(title="GlaucoAI · API académica", lifespan=lifespan)
+    app.state.demo = frontend_dist is not None
+    app.include_router(api, prefix="/api")
+    app.include_router(api, include_in_schema=False)
+    if frontend_dist is not None:
+        if not (frontend_dist / "index.html").is_file():
+            raise FileNotFoundError("Falta frontend/dist/index.html. Ejecuta npm.cmd run build en frontend.")
+        app.add_middleware(TrustedHostMiddleware, allowed_hosts=["127.0.0.1", "localhost"])
+        # Keep the API and its legacy aliases ahead of the root static mount.
+        app.mount("/", DemoStaticFiles(directory=frontend_dist, html=True), name="frontend")
+    return app
+
+
+app = create_app()

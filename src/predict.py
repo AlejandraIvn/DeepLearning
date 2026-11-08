@@ -26,7 +26,7 @@ def checkpoint_transform(checkpoint: dict):
 @torch.inference_mode()
 def score_image(model, image: Image.Image, transform, device: torch.device | str) -> float:
     device = torch.device(device)
-    pixels = transform(image.convert("RGB")).unsqueeze(0).to(device)
+    pixels = transform(image if image.mode == "RGB" else image.convert("RGB")).unsqueeze(0).to(device)
     with torch.autocast(device.type, enabled=False):
         score = torch.sigmoid(model(pixels)).item()
     if not math.isfinite(score):

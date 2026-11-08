@@ -1,5 +1,11 @@
 
-@import url('https://fonts.googleapis.com/css2?family=Nunito:wght@400;500;600;700;800&display=swap');
+@font-face {
+  font-family: 'Nunito';
+  font-style: normal;
+  font-weight: 400 800;
+  font-display: swap;
+  src: url('./assets/nunito-latin.woff2') format('woff2');
+}
 
 :root {
   font-family: 'Nunito', sans-serif;
