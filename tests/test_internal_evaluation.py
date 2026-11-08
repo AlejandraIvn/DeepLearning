@@ -13,6 +13,7 @@ from torch import nn
 from torch.utils.data import DataLoader, TensorDataset
 
 from src import internal_test
+from src.compare import plot_curves
 from src.device import select_device
 
 
@@ -91,3 +92,10 @@ class InternalEvaluationTests(unittest.TestCase):
             with self.assertRaises(FileExistsError):
                 internal_test.run_test({}, Path("unused"), Path("unused"))
         prepare.assert_not_called()
+
+    def test_curves_accept_integer_labels_from_saved_predictions(self) -> None:
+        with TemporaryDirectory() as temporary:
+            output = Path(temporary) / "curves.png"
+            plot_curves(output, torch.tensor([0, 1]), {"Modelo": torch.tensor([-1., 1.])},
+                        {"Modelo": (1.0, 1.0)}, split_label="test interno")
+            self.assertGreater(output.stat().st_size, 0)

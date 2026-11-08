@@ -64,7 +64,7 @@ def plot_curves(
         roc.plot(false_positive_rate, sensitivity, label=f"{name} · AUC {roc_auc:.3f}")
         pr.step(recall, precision, where="post", label=f"{name} · AP {average_precision:.3f}")
     roc.plot([0, 1], [0, 1], "--", color="gray")
-    pr.axhline(labels.mean().item(), linestyle="--", color="gray", label="Fracción positiva")
+    pr.axhline(labels.float().mean().item(), linestyle="--", color="gray", label="Fracción positiva")
     roc.set(title=f"ROC · {split_label}", xlabel="1 − especificidad", ylabel="Sensibilidad")
     pr.set(title=f"Precisión–recall · {split_label}", xlabel="Sensibilidad", ylabel="Precisión")
     for axis in (roc, pr):
