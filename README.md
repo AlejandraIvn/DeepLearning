@@ -196,10 +196,10 @@ Para una instalación solo CPU, usa `https://download.pytorch.org/whl/cpu` como 
 ### Arranque con un comando
 
 ```powershell
-powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\Start-GlaucoAI.ps1
+.\.venv\Scripts\python.exe -m backend.demo
 ```
 
-Desde la raíz, ejecuta el comando y abre [GlaucoAI](http://127.0.0.1:8000/) cuando Uvicorn anuncie la dirección. El script comprueba `.venv`, importa las dependencias, requiere el build y verifica el checkpoint antes de abrir el puerto. Añade `-Cpu` para forzar CPU o `-Port 8001` para elegir otro puerto local. El proceso usa las dependencias ya instaladas. Para detenerlo, pulsa `Ctrl+C`.
+Desde la raíz, ejecuta el comando y abre [GlaucoAI](http://127.0.0.1:8000/) cuando Uvicorn anuncie la dirección. El comando requiere el build del frontend y verifica el checkpoint antes de abrir el puerto. Añade `--cpu` para forzar CPU o `--port 8001` para elegir otro puerto local. El proceso usa las dependencias ya instaladas. Para detenerlo, pulsa `Ctrl+C`.
 
 | Ruta de FastAPI | Respuesta |
 |---|---|
@@ -260,15 +260,14 @@ Abre [GlaucoAI](http://127.0.0.1:8000/). El contenedor compila React, sirve la a
 ### Backend en Render
 
 1. Crea un Blueprint con `render.yaml` en la rama del repositorio que contenga estos archivos. El servicio `glaucoai-api` usa Docker en CPU, plan gratuito `free` (0,1 CPU y 512 MB de RAM) y verificación en `/api/health`. [Planes de Render](https://render.com/docs/compute-plans)
-2. Configura `GLAUCOAI_CHECKPOINT_URL` con una URL HTTPS privada o firmada que entregue directamente el `best.pt` autorizado. Render la necesita en cada arranque. Si vence, renueva el secreto antes del siguiente reinicio. El backend verifica el mismo SHA-256 congelado antes de deserializar el archivo.
-3. Configura `GLAUCOAI_ACCESS_TOKEN` con un token aleatorio URL-safe. Puedes generarlo localmente con `python -c "import secrets; print(secrets.token_urlsafe(32))"`. Conserva ambos valores en los secretos de Render. Comparte el token solo con las personas autorizadas para probar la demo.
-4. Abre `/api/health` en la URL HTTPS de Render y espera a que devuelva JSON con `model_ready: true` antes de subir una imagen. Render Free suspende el servicio tras 15 minutos de inactividad y el siguiente arranque en frío puede tardar alrededor de un minuto o más. Los endpoints que reciben imágenes exigen `Authorization: Bearer <token>`. [Límites del plan gratuito](https://render.com/docs/free)
+2. En **Environment → Secret Files**, crea `glaucoai-checkpoint-url`. Como contenido, pega la URL HTTPS privada o firmada que entrega directamente el `best.pt` autorizado. Render la necesita en cada arranque. Si vence, actualiza el archivo. El backend verifica el SHA-256 congelado antes de deserializar el modelo. [Archivos secretos de Render](https://render.com/docs/configure-environment-variables#secret-files)
+3. Abre `/api/health` en la URL HTTPS de Render y espera a que devuelva JSON con `model_ready: true`. Render Free suspende el servicio tras 15 minutos de inactividad y el siguiente arranque en frío puede tardar más de un minuto. [Límites del plan gratuito](https://render.com/docs/free)
 
 ### Frontend en Vercel
 
 1. Importa el mismo repositorio y elige **`frontend`** como **Root Directory**. Selecciona Node.js 24. `frontend/vercel.json` compila Vite y publica `dist`.
-2. El proxy `/api/*` apunta a `https://glaucoai-api.onrender.com`. Si Render asigna otra URL, actualiza `destination` en `frontend/vercel.json` antes de desplegar. Las solicitudes del navegador siguen en el mismo origen.
-3. En **Deployment Protection**, aplica **Vercel Authentication** a todos los despliegues. La interfaz pedirá además el código de acceso del backend. Prueba primero con imágenes sintéticas. Usa datos médicos únicamente tras revisar los permisos y el tratamiento de datos en ambos proveedores. [Protección de despliegues en Vercel](https://vercel.com/changelog/protect-production-deployments-for-free-on-every-plan)
+2. En **Settings → Environment Variables**, configura `VITE_API_URL` con el origen HTTPS de Render, por ejemplo `https://glaucoai-api.onrender.com`. Selecciona **Production** y vuelve a desplegar si cambias el valor. [Variables de entorno en Vercel](https://vercel.com/docs/environment-variables/managing-environment-variables)
+3. En **Deployment Protection**, verifica que el dominio de producción sea público y comparte esa URL. Prueba la demo con imágenes sintéticas. Usa datos médicos únicamente tras revisar los permisos y el tratamiento de datos en ambos proveedores. [Protección de despliegues en Vercel](https://vercel.com/docs/deployment-protection)
 
 ## Experimentos históricos del notebook
 
@@ -313,7 +312,6 @@ Se prioriza el **recall**, porque un falso negativo (glaucoma no detectado) es m
 ├── frontend/         # aplicación React y build generado por Vite
 ├── scripts/          # medición reproducible de la demo
 ├── tests/            # pruebas de modelos, datos e integración
-├── Start-GlaucoAI.ps1
 └── README.md
 ```
 
@@ -322,7 +320,6 @@ Se prioriza el **recall**, porque un falso negativo (glaucoma no detectado) es m
 - Un único split. No se usó validación cruzada.
 - La CNN histórica usa 96 × 96 px. ResNet18 usa 224 × 224 px y su Grad-CAM parte de una cuadrícula de 7 × 7.
 - Los puntajes son experimentales, pueden producir falsos positivos y negativos, y carecen de calibración y validación clínica. Los ejemplos Grad-CAM son ilustrativos.
-- La demo se limita a localhost. Su uso en red requeriría autenticación, protección del tráfico y una revisión de privacidad y seguridad.
 
 ## Licencia y créditos
 PAPILA se cita como Kovalyk et al., *Scientific Data* 9, 291 (2022). Figshare indica GPL 3.0+ para su versión 2. La fuente Nunito se distribuye con su aviso SIL OFL 1.1. [Artículo de PAPILA](https://doi.org/10.1038/s41597-022-01388-1) · [Depósito y licencia de PAPILA](https://figshare.com/articles/dataset/PAPILA/14798004) · [Licencia de Nunito](frontend/public/OFL-Nunito.txt)

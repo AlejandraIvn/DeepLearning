@@ -4,7 +4,7 @@ import './App.css'
 const maxImageBytes = 10 * 1024 * 1024
 const scoreFormat = new Intl.NumberFormat('es-CO', { minimumFractionDigits: 4, maximumFractionDigits: 4 })
 const connectionError = 'No se pudo conectar con el servidor de análisis. Comprueba que esté iniciado.'
-const remote = import.meta.env.MODE === 'vercel'
+const apiUrl = (import.meta.env.VITE_API_URL || '').trim().replace(/\/+$/, '')
 
 function App() {
   const [image, setImage] = useState(null)
@@ -12,7 +12,6 @@ function App() {
   const [result, setResult] = useState(null)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
-  const [accessCode, setAccessCode] = useState('')
   const activeRequest = useRef(null)
 
   useEffect(() => () => {
@@ -55,7 +54,7 @@ function App() {
   }
 
   const analyzeImage = async () => {
-    if (!image || activeRequest.current || (remote && !accessCode.trim())) return
+    if (!image || activeRequest.current) return
     const request = new AbortController()
     activeRequest.current = request
     setLoading(true)
@@ -63,11 +62,10 @@ function App() {
     setResult(null)
     const timeout = window.setTimeout(() => request.abort(), 60_000)
     try {
-      const response = await fetch('/api/analyze', {
+      const response = await fetch(`${apiUrl}/api/analyze`, {
         method: 'POST',
         headers: {
           'Content-Type': image.type,
-          ...(remote && { Authorization: `Bearer ${accessCode.trim()}` }),
         },
         body: image,
         cache: 'no-store',
@@ -155,14 +153,7 @@ function App() {
             </div>
           )}
 
-          {remote && (
-            <label className="access-code">
-              Código de acceso de la demostración
-              <input type="password" autoComplete="off" value={accessCode}
-                onChange={(event) => setAccessCode(event.target.value)} />
-            </label>
-          )}
-          <button type="button" className="analyze-button" disabled={!image || loading || (remote && !accessCode.trim())}
+          <button type="button" className="analyze-button" disabled={!image || loading}
             onClick={analyzeImage}>
             {loading ? 'Analizando imagen…' : 'Analizar imagen'}
           </button>

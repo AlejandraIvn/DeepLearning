@@ -1,5 +1,6 @@
 .git
 **/.env*
+/glaucoai-checkpoint-url
 **/.venv
 **/venv
 **/__pycache__

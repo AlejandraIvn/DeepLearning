@@ -5,7 +5,6 @@ from __future__ import annotations
 import asyncio
 import base64
 import hashlib
-import hmac
 import json
 import logging
 import os
@@ -22,6 +21,7 @@ import torch
 from fastapi import APIRouter, FastAPI, HTTPException, Request, Response
 from PIL import Image, ImageOps
 from pydantic import BaseModel
+from starlette.middleware.cors import CORSMiddleware
 from starlette.middleware.trustedhost import TrustedHostMiddleware
 from starlette.requests import ClientDisconnect
 from starlette.responses import JSONResponse
@@ -38,6 +38,7 @@ from src.pretrained import PapilaResNet18
 ROOT = Path(__file__).resolve().parents[1]
 CONFIG = ROOT / "configs" / "papila-internal-test.json"
 FRONTEND_DIST = ROOT / "frontend" / "dist"
+CHECKPOINT_URL_FILE = Path("/etc/secrets/glaucoai-checkpoint-url")
 MAX_UPLOAD_BYTES = 10 * 1024 * 1024
 MAX_CHECKPOINT_BYTES = 64 * 1024 * 1024
 MAX_PIXELS = 6_000_000
@@ -110,7 +111,7 @@ class ModelService:
 
 
 def is_remote() -> bool:
-    return os.getenv("GLAUCOAI_REMOTE") == "1" or os.getenv("RENDER") == "true"
+    return os.getenv("RENDER") == "true"
 
 
 class NoCheckpointRedirects(HTTPRedirectHandler):
@@ -119,14 +120,14 @@ class NoCheckpointRedirects(HTTPRedirectHandler):
 
 
 def _remote_checkpoint() -> bytes:
-    url = os.getenv("GLAUCOAI_CHECKPOINT_URL", "")
     try:
+        url = CHECKPOINT_URL_FILE.read_text(encoding="utf-8").strip()
         origin = urlsplit(url)
         valid = origin.scheme == "https" and origin.hostname and not origin.username and not origin.password
-    except ValueError:
+    except (OSError, ValueError):
         valid = False
     if not valid:
-        raise ValueError("Configura GLAUCOAI_CHECKPOINT_URL con una URL HTTPS privada.")
+        raise ValueError("Configura el archivo secreto glaucoai-checkpoint-url con una URL HTTPS privada.")
     try:
         with build_opener(NoCheckpointRedirects()).open(url, timeout=30) as response:
             content = response.read(MAX_CHECKPOINT_BYTES + 1)
@@ -204,11 +205,6 @@ async def _read_image(request: Request) -> tuple[bytes, str]:
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    remote = is_remote()
-    token = os.getenv("GLAUCOAI_ACCESS_TOKEN", "") if remote else ""
-    if remote and (len(token) < 32 or not token.isascii() or not all(c.isalnum() or c in "-_" for c in token)):
-        raise RuntimeError("Configura GLAUCOAI_ACCESS_TOKEN con un token URL-safe de al menos 32 caracteres.")
-    app.state.access_token = token.encode("ascii")
     app.state.service = None
     app.state.slots = asyncio.Semaphore(2)
     try:
@@ -220,7 +216,7 @@ async def lifespan(app: FastAPI):
         logger.error("No se pudo verificar el modelo: %s", error)
     except (OSError, RuntimeError, KeyError):
         logger.error("No se pudo cargar el modelo académico.")
-    if (app.state.demo or remote) and app.state.service is None:
+    if (app.state.demo or is_remote()) and app.state.service is None:
         raise RuntimeError("La demostración requiere el checkpoint congelado y un entorno compatible.")
     # Keep CUDA work on one thread so its library workspaces can be reused.
     with ThreadPoolExecutor(max_workers=1, thread_name_prefix="glaucoai") as worker:
@@ -245,12 +241,6 @@ async def health(request: Request, response: Response):
 
 
 async def _process(request: Request, *, explain: bool):
-    token = request.app.state.access_token
-    if token:
-        scheme, _, candidate = request.headers.get("authorization", "").partition(" ")
-        if scheme.lower() != "bearer" or not hmac.compare_digest(candidate.encode("utf-8"), token):
-            raise HTTPException(401, "Ingresa el código de acceso de la demostración.",
-                                headers={**NO_STORE, "WWW-Authenticate": "Bearer"})
     service = request.app.state.service
     if service is None:
         raise _error(503, NOT_READY)
@@ -307,6 +297,8 @@ def create_app(frontend_dist: Path | None = None) -> FastAPI:
         app.add_middleware(TrustedHostMiddleware, allowed_hosts=["127.0.0.1", "localhost"])
         # Keep the API and its legacy aliases ahead of the root static mount.
         app.mount("/", DemoStaticFiles(directory=frontend_dist, html=True), name="frontend")
+    elif is_remote():
+        app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["GET", "POST"])
     return app
 
 

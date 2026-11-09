@@ -6,10 +6,3 @@ services:
     dockerfilePath: ./Dockerfile
     healthCheckPath: /api/health
     autoDeployTrigger: "off"
-    envVars:
-      - key: GLAUCOAI_REMOTE
-        value: "1"
-      - key: GLAUCOAI_ACCESS_TOKEN
-        sync: false
-      - key: GLAUCOAI_CHECKPOINT_URL
-        sync: false

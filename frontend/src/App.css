@@ -179,20 +179,6 @@ button, input {
   overflow-wrap: anywhere;
 }
 
-.access-code {
-  display: grid;
-  gap: 6px;
-  margin-top: 16px;
-  text-align: left;
-  font-size: 14px;
-}
-
-.access-code input {
-  padding: 8px 12px;
-  border: 1px solid #b8d6e2;
-  border-radius: 8px;
-}
-
 .analyze-button {
   width: 100%;
   margin-top: 22px;
