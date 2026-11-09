@@ -1,0 +1,4 @@
+-r requirements-backend.txt
+-r requirements-data.txt
+-r requirements-training.txt
+httpx2==2.16.0
