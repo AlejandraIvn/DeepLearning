@@ -2,7 +2,7 @@ services:
   - type: web
     name: glaucoai-api
     runtime: docker
-    plan: 1c-2g
+    plan: free
     dockerfilePath: ./Dockerfile
     healthCheckPath: /api/health
     autoDeployTrigger: "off"

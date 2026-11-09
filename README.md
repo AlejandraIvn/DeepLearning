@@ -259,10 +259,10 @@ Abre [GlaucoAI](http://127.0.0.1:8000/). El contenedor compila React, sirve la a
 
 ### Backend en Render
 
-1. Crea un Blueprint con `render.yaml` en la rama del repositorio que contenga estos archivos. El servicio `glaucoai-api` usa Docker en CPU, plan de pago `1c-2g` (2 GB de RAM) y verificación en `/api/health`. Revisa el coste antes de crear el servicio. [Planes de Render](https://render.com/docs/compute-plans)
+1. Crea un Blueprint con `render.yaml` en la rama del repositorio que contenga estos archivos. El servicio `glaucoai-api` usa Docker en CPU, plan gratuito `free` (0,1 CPU y 512 MB de RAM) y verificación en `/api/health`. [Planes de Render](https://render.com/docs/compute-plans)
 2. Configura `GLAUCOAI_CHECKPOINT_URL` con una URL HTTPS privada o firmada que entregue directamente el `best.pt` autorizado. Render la necesita en cada arranque. Si vence, renueva el secreto antes del siguiente reinicio. El backend verifica el mismo SHA-256 congelado antes de deserializar el archivo.
 3. Configura `GLAUCOAI_ACCESS_TOKEN` con un token aleatorio URL-safe. Puedes generarlo localmente con `python -c "import secrets; print(secrets.token_urlsafe(32))"`. Conserva ambos valores en los secretos de Render. Comparte el token solo con las personas autorizadas para probar la demo.
-4. Comprueba que `/api/health` responde `200` en la URL HTTPS de Render. Los endpoints que reciben imágenes exigen `Authorization: Bearer <token>`.
+4. Abre `/api/health` en la URL HTTPS de Render y espera a que devuelva JSON con `model_ready: true` antes de subir una imagen. Render Free suspende el servicio tras 15 minutos de inactividad y el siguiente arranque en frío puede tardar alrededor de un minuto o más. Los endpoints que reciben imágenes exigen `Authorization: Bearer <token>`. [Límites del plan gratuito](https://render.com/docs/free)
 
 ### Frontend en Vercel
 
