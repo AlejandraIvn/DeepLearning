@@ -4,6 +4,7 @@ import './App.css'
 const maxImageBytes = 10 * 1024 * 1024
 const scoreFormat = new Intl.NumberFormat('es-CO', { minimumFractionDigits: 4, maximumFractionDigits: 4 })
 const connectionError = 'No se pudo conectar con el servidor de análisis. Comprueba que esté iniciado.'
+const remote = import.meta.env.MODE === 'vercel'
 
 function App() {
   const [image, setImage] = useState(null)
@@ -11,6 +12,7 @@ function App() {
   const [result, setResult] = useState(null)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
+  const [accessCode, setAccessCode] = useState('')
   const activeRequest = useRef(null)
 
   useEffect(() => () => {
@@ -53,7 +55,7 @@ function App() {
   }
 
   const analyzeImage = async () => {
-    if (!image || activeRequest.current) return
+    if (!image || activeRequest.current || (remote && !accessCode.trim())) return
     const request = new AbortController()
     activeRequest.current = request
     setLoading(true)
@@ -63,7 +65,10 @@ function App() {
     try {
       const response = await fetch('/api/analyze', {
         method: 'POST',
-        headers: { 'Content-Type': image.type },
+        headers: {
+          'Content-Type': image.type,
+          ...(remote && { Authorization: `Bearer ${accessCode.trim()}` }),
+        },
         body: image,
         cache: 'no-store',
         signal: request.signal,
@@ -150,7 +155,15 @@ function App() {
             </div>
           )}
 
-          <button type="button" className="analyze-button" disabled={!image || loading} onClick={analyzeImage}>
+          {remote && (
+            <label className="access-code">
+              Código de acceso de la demostración
+              <input type="password" autoComplete="off" value={accessCode}
+                onChange={(event) => setAccessCode(event.target.value)} />
+            </label>
+          )}
+          <button type="button" className="analyze-button" disabled={!image || loading || (remote && !accessCode.trim())}
+            onClick={analyzeImage}>
             {loading ? 'Analizando imagen…' : 'Analizar imagen'}
           </button>
           {error && <p className="analysis-error" role="alert">{error}</p>}

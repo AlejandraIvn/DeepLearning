@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import base64
 import hashlib
+import hmac
 import json
 import logging
 import os
@@ -14,6 +15,8 @@ from dataclasses import dataclass
 from functools import partial
 from io import BytesIO
 from pathlib import Path
+from urllib.parse import urlsplit
+from urllib.request import HTTPRedirectHandler, build_opener
 
 import torch
 from fastapi import APIRouter, FastAPI, HTTPException, Request, Response
@@ -36,6 +39,7 @@ ROOT = Path(__file__).resolve().parents[1]
 CONFIG = ROOT / "configs" / "papila-internal-test.json"
 FRONTEND_DIST = ROOT / "frontend" / "dist"
 MAX_UPLOAD_BYTES = 10 * 1024 * 1024
+MAX_CHECKPOINT_BYTES = 64 * 1024 * 1024
 MAX_PIXELS = 6_000_000
 MAX_SIDE = 4096
 PREVIEW_SIDE = 1024
@@ -105,10 +109,38 @@ class ModelService:
             )
 
 
+def is_remote() -> bool:
+    return os.getenv("GLAUCOAI_REMOTE") == "1" or os.getenv("RENDER") == "true"
+
+
+class NoCheckpointRedirects(HTTPRedirectHandler):
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        return None
+
+
+def _remote_checkpoint() -> bytes:
+    url = os.getenv("GLAUCOAI_CHECKPOINT_URL", "")
+    try:
+        origin = urlsplit(url)
+        valid = origin.scheme == "https" and origin.hostname and not origin.username and not origin.password
+    except ValueError:
+        valid = False
+    if not valid:
+        raise ValueError("Configura GLAUCOAI_CHECKPOINT_URL con una URL HTTPS privada.")
+    try:
+        with build_opener(NoCheckpointRedirects()).open(url, timeout=30) as response:
+            content = response.read(MAX_CHECKPOINT_BYTES + 1)
+    except (OSError, ValueError):
+        raise ValueError("No se pudo descargar el checkpoint. Revisa la vigencia y los permisos de la URL.") from None
+    if len(content) > MAX_CHECKPOINT_BYTES:
+        raise ValueError("El checkpoint remoto supera 64 MiB.")
+    return content
+
+
 def load_model() -> ModelService:
     spec = json.loads(CONFIG.read_text(encoding="utf-8"))["models"]["ResNet18"]
     # Load the same bytes whose digest was verified, even if the file is replaced.
-    content = (ROOT / spec["checkpoint"]).read_bytes()
+    content = _remote_checkpoint() if is_remote() else (ROOT / spec["checkpoint"]).read_bytes()
     if hashlib.sha256(content).hexdigest() != spec["sha256"]:
         raise ValueError("SHA-256 del checkpoint ResNet18 distinto del congelado.")
     device = select_device(prefer_cuda=os.environ.get("GLAUCOAI_CPU") != "1", enable_amp=False).device
@@ -172,6 +204,11 @@ async def _read_image(request: Request) -> tuple[bytes, str]:
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    remote = is_remote()
+    token = os.getenv("GLAUCOAI_ACCESS_TOKEN", "") if remote else ""
+    if remote and (len(token) < 32 or not token.isascii() or not all(c.isalnum() or c in "-_" for c in token)):
+        raise RuntimeError("Configura GLAUCOAI_ACCESS_TOKEN con un token URL-safe de al menos 32 caracteres.")
+    app.state.access_token = token.encode("ascii")
     app.state.service = None
     app.state.slots = asyncio.Semaphore(2)
     try:
@@ -183,7 +220,7 @@ async def lifespan(app: FastAPI):
         logger.error("No se pudo verificar el modelo: %s", error)
     except (OSError, RuntimeError, KeyError):
         logger.error("No se pudo cargar el modelo académico.")
-    if app.state.demo and app.state.service is None:
+    if (app.state.demo or remote) and app.state.service is None:
         raise RuntimeError("La demostración requiere el checkpoint congelado y un entorno compatible.")
     # Keep CUDA work on one thread so its library workspaces can be reused.
     with ThreadPoolExecutor(max_workers=1, thread_name_prefix="glaucoai") as worker:
@@ -208,6 +245,12 @@ async def health(request: Request, response: Response):
 
 
 async def _process(request: Request, *, explain: bool):
+    token = request.app.state.access_token
+    if token:
+        scheme, _, candidate = request.headers.get("authorization", "").partition(" ")
+        if scheme.lower() != "bearer" or not hmac.compare_digest(candidate.encode("utf-8"), token):
+            raise HTTPException(401, "Ingresa el código de acceso de la demostración.",
+                                headers={**NO_STORE, "WWW-Authenticate": "Bearer"})
     service = request.app.state.service
     if service is None:
         raise _error(503, NOT_READY)

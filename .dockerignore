@@ -1,0 +1,15 @@
+.git
+**/.env*
+**/.venv
+**/venv
+**/__pycache__
+**/node_modules
+**/dist
+**/.vercel
+data
+models
+notebooks
+tests
+**/*.pt
+**/*.pth
+**/*.onnx

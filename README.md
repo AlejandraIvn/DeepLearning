@@ -13,6 +13,7 @@ GlaucoAI es una demostración académica local que clasifica imágenes de fondo 
 - [Evaluación interna congelada de PAPILA](#evaluación-interna-congelada-de-papila)
 - [Grad-CAM de ResNet18 en validación](#grad-cam-de-resnet18-en-validación)
 - [Instalación y uso en Windows](#instalación-y-uso-en-windows)
+- [Docker, Vercel y Render](#docker-vercel-y-render)
 - [Experimentos históricos del notebook](#experimentos-históricos-del-notebook)
 - [Estructura del repositorio](#estructura-del-repositorio)
 - [Limitaciones](#limitaciones)
@@ -241,6 +242,33 @@ El script verifica el manifiesto y los pesos. Mide la API ASGI en proceso despu�
 En CUDA, el pico fue de 106,46 MiB asignados y 132 MiB reservados. Después de las tandas consecutiva y concurrente quedaron 58,94 MiB asignados, igual que tras el calentamiento. Los 132 MiB reservados incluyen la caché del asignador de PyTorch.
 
 Auditoría npm del 8 de noviembre de 2026. Producción reporta cero hallazgos. Desarrollo reporta cuatro entradas moderadas asociadas al mismo aviso de `minimatch` 10.2.6. `eslint` y `@eslint/config-array` requieren la rama 10 y `@eslint/js` tiene a `eslint` como par opcional. El parche publicado, 11.0.1, queda fuera de esos rangos. Queda pendiente una versión compatible de la cadena de lint. [Aviso GHSA-g3hv-75wg-m249](https://github.com/advisories/GHSA-g3hv-75wg-m249)
+
+## Docker, Vercel y Render
+
+### Contenedor local
+
+Con Docker Desktop en modo de contenedores Linux, ejecuta desde la raíz en PowerShell:
+
+```powershell
+$weights = (Resolve-Path '.\models\runs\papila-resnet18\best.pt').Path
+docker build --platform linux/amd64 -t glaucoai:local .
+docker run --rm -p 127.0.0.1:8000:8000 --mount "type=bind,source=$weights,target=/app/models/runs/papila-resnet18/best.pt,readonly" glaucoai:local
+```
+
+Abre [GlaucoAI](http://127.0.0.1:8000/). El contenedor compila React, sirve la aplicación y ejecuta PyTorch en CPU. El checkpoint se monta en solo lectura y se verifica al arrancar. El contexto de compilación excluye los pesos, los datos y los resultados locales.
+
+### Backend en Render
+
+1. Crea un Blueprint con `render.yaml` en la rama del repositorio que contenga estos archivos. El servicio `glaucoai-api` usa Docker en CPU, plan de pago `1c-2g` (2 GB de RAM) y verificación en `/api/health`. Revisa el coste antes de crear el servicio. [Planes de Render](https://render.com/docs/compute-plans)
+2. Configura `GLAUCOAI_CHECKPOINT_URL` con una URL HTTPS privada o firmada que entregue directamente el `best.pt` autorizado. Render la necesita en cada arranque. Si vence, renueva el secreto antes del siguiente reinicio. El backend verifica el mismo SHA-256 congelado antes de deserializar el archivo.
+3. Configura `GLAUCOAI_ACCESS_TOKEN` con un token aleatorio URL-safe. Puedes generarlo localmente con `python -c "import secrets; print(secrets.token_urlsafe(32))"`. Conserva ambos valores en los secretos de Render. Comparte el token solo con las personas autorizadas para probar la demo.
+4. Comprueba que `/api/health` responde `200` en la URL HTTPS de Render. Los endpoints que reciben imágenes exigen `Authorization: Bearer <token>`.
+
+### Frontend en Vercel
+
+1. Importa el mismo repositorio y elige **`frontend`** como **Root Directory**. Selecciona Node.js 24. `frontend/vercel.json` compila Vite y publica `dist`.
+2. El proxy `/api/*` apunta a `https://glaucoai-api.onrender.com`. Si Render asigna otra URL, actualiza `destination` en `frontend/vercel.json` antes de desplegar. Las solicitudes del navegador siguen en el mismo origen.
+3. En **Deployment Protection**, aplica **Vercel Authentication** a todos los despliegues. La interfaz pedirá además el código de acceso del backend. Prueba primero con imágenes sintéticas. Usa datos médicos únicamente tras revisar los permisos y el tratamiento de datos en ambos proveedores. [Protección de despliegues en Vercel](https://vercel.com/changelog/protect-production-deployments-for-free-on-every-plan)
 
 ## Experimentos históricos del notebook
 
