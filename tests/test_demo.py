@@ -16,7 +16,7 @@ from test_backend import upload
 
 
 SPEC = json.loads(main.CONFIG.read_text(encoding="utf-8"))["models"]["ResNet18"]
-CHECKPOINT = main.ROOT / SPEC["checkpoint"]
+CHECKPOINT = main.CHECKPOINT
 ORIGIN = "http://127.0.0.1:8000"
 
 
@@ -38,11 +38,10 @@ class DemoStartupTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             app = main.create_app(fixture_dist(root))
-            with patch.object(main, "ROOT", root), patch.object(main, "load_checkpoint") as deserialize:
+            path = root / "best.pt"
+            with patch.object(main, "CHECKPOINT", path), patch.object(main, "load_checkpoint") as deserialize:
                 for checkpoint_present, message in ((False, "Falta el checkpoint"), (True, "SHA-256")):
                     if checkpoint_present:
-                        path = root / SPEC["checkpoint"]
-                        path.parent.mkdir(parents=True)
                         path.write_bytes(b"different model")
                     with self.subTest(checkpoint_present=checkpoint_present), self.assertLogs(main.logger) as logs:
                         with self.assertRaisesRegex(RuntimeError, "demostración requiere"):
@@ -52,7 +51,6 @@ class DemoStartupTests(unittest.TestCase):
                 deserialize.assert_not_called()
 
 
-@unittest.skipUnless(CHECKPOINT.is_file(), "Checkpoint congelado local no disponible")
 class DemoCheckpointTests(unittest.TestCase):
     def _verify_demo(self, *, cpu: bool):
         self.addCleanup(torch.set_num_threads, torch.get_num_threads())

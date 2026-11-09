@@ -14,3 +14,4 @@ tests
 **/*.pt
 **/*.pth
 **/*.onnx
+!backend/predict/best.pt

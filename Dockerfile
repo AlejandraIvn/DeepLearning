@@ -20,8 +20,8 @@ COPY backend/ ./backend/
 COPY src/ ./src/
 COPY configs/papila-internal-test.json ./configs/
 COPY --from=frontend-build /build/dist ./frontend/dist/
-RUN mkdir -p /app/models/runs/papila-resnet18
-USER 10001:1000
+RUN test -s backend/predict/best.pt
+USER 10001:10001
 EXPOSE 8000
 HEALTHCHECK --start-period=60s CMD ["python", "-c", "import os, urllib.request; urllib.request.urlopen('http://127.0.0.1:' + os.getenv('PORT', '8000') + '/api/health', timeout=3).close()"]
 CMD ["python", "-m", "backend.container"]

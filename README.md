@@ -191,7 +191,7 @@ npm.cmd --prefix frontend ci
 npm.cmd --prefix frontend run build
 ```
 
-Para una instalación solo CPU, usa `https://download.pytorch.org/whl/cpu` como índice en el comando de PyTorch. Coloca tu copia autorizada del checkpoint congelado en `models/runs/papila-resnet18/best.pt`. El SHA-256 esperado es `721699061b8f0489b77d3f2ce19bccd0d6468a396fc315d1d112ef41c154b761`. Para preparar otra máquina lleva el código y, opcionalmente, `frontend/dist/` ya compilado. Prepara allí el entorno Python y la copia autorizada del checkpoint. La demo acepta una imagen elegida localmente durante la presentación.
+Para una instalación solo CPU, usa `https://download.pytorch.org/whl/cpu` como índice en el comando de PyTorch. El repositorio incluye el checkpoint de la demo en `backend/predict/best.pt`. Su SHA-256 es `721699061b8f0489b77d3f2ce19bccd0d6468a396fc315d1d112ef41c154b761`. Para preparar otra máquina, clona el repositorio e instala las dependencias.
 
 ### Arranque con un comando
 
@@ -250,17 +250,16 @@ Auditoría npm del 8 de noviembre de 2026. Producción reporta cero hallazgos. D
 Con Docker Desktop en modo de contenedores Linux, ejecuta desde la raíz en PowerShell:
 
 ```powershell
-$weights = (Resolve-Path '.\models\runs\papila-resnet18\best.pt').Path
 docker build --platform linux/amd64 -t glaucoai:local .
-docker run --rm -p 127.0.0.1:8000:8000 --mount "type=bind,source=$weights,target=/app/models/runs/papila-resnet18/best.pt,readonly" glaucoai:local
+docker run --rm -p 127.0.0.1:8000:8000 glaucoai:local
 ```
 
-Abre [GlaucoAI](http://127.0.0.1:8000/). El contenedor compila React, sirve la aplicación y ejecuta PyTorch en CPU. El checkpoint se monta en solo lectura y se verifica al arrancar. El contexto de compilación excluye los pesos, los datos y los resultados locales.
+Abre [GlaucoAI](http://127.0.0.1:8000/). El contenedor compila React, sirve la aplicación y ejecuta PyTorch en CPU. La imagen incluye el checkpoint de la demo y verifica su SHA-256 al arrancar.
 
 ### Backend en Render
 
 1. Crea un Blueprint con `render.yaml` en la rama del repositorio que contenga estos archivos. El servicio `glaucoai-api` usa Docker en CPU, plan gratuito `free` (0,1 CPU y 512 MB de RAM) y verificación en `/api/health`. [Planes de Render](https://render.com/docs/compute-plans)
-2. En **Environment → Secret Files**, crea `glaucoai-checkpoint-url`. Como contenido, pega la URL HTTPS privada o firmada que entrega directamente el `best.pt` autorizado. Render la necesita en cada arranque. Si vence, actualiza el archivo. El backend verifica el SHA-256 congelado antes de deserializar el modelo. [Archivos secretos de Render](https://render.com/docs/configure-environment-variables#secret-files)
+2. Render construye la imagen con `backend/predict/best.pt` incluido. Para desplegar un commit nuevo, inicia el despliegue manualmente desde el servicio.
 3. Abre `/api/health` en la URL HTTPS de Render y espera a que devuelva JSON con `model_ready: true`. Render Free suspende el servicio tras 15 minutos de inactividad y el siguiente arranque en frío puede tardar más de un minuto. [Límites del plan gratuito](https://render.com/docs/free)
 
 ### Frontend en Vercel

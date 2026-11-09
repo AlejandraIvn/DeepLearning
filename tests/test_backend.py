@@ -127,12 +127,9 @@ class BackendTests(unittest.TestCase):
 class ModelStartupTests(unittest.TestCase):
     def test_bad_checkpoint_is_rejected_before_deserialization(self):
         with tempfile.TemporaryDirectory() as directory:
-            root = Path(directory)
-            spec = json.loads(main.CONFIG.read_text(encoding="utf-8"))["models"]["ResNet18"]
-            path = root / spec["checkpoint"]
-            path.parent.mkdir(parents=True)
+            path = Path(directory) / "best.pt"
             path.write_bytes(b"corrupted checkpoint")
-            with patch.object(main, "ROOT", root), patch.object(main, "load_checkpoint") as deserialize:
+            with patch.object(main, "CHECKPOINT", path), patch.object(main, "load_checkpoint") as deserialize:
                 with self.assertRaisesRegex(ValueError, "SHA-256"):
                     main.load_model()
             deserialize.assert_not_called()

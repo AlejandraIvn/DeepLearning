@@ -121,7 +121,7 @@ def run() -> None:
         payloads = [(args.dataset_dir / validation[image_id].relative_path).read_bytes() for image_id in args.image_id]
         report = benchmark(payloads, args.samples)
         spec = config["models"]["ResNet18"]
-        if sha256(main.ROOT / spec["checkpoint"]) != spec["sha256"] or sha256(args.manifest) != manifest_sha:
+        if sha256(main.CHECKPOINT) != spec["sha256"] or sha256(args.manifest) != manifest_sha:
             raise ValueError("El checkpoint o el manifiesto cambió durante la medición.")
     except (OSError, ValueError, RuntimeError) as error:
         parser.error(str(error))

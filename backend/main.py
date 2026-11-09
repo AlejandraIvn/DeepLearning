@@ -14,8 +14,6 @@ from dataclasses import dataclass
 from functools import partial
 from io import BytesIO
 from pathlib import Path
-from urllib.parse import urlsplit
-from urllib.request import HTTPRedirectHandler, build_opener
 
 import torch
 from fastapi import APIRouter, FastAPI, HTTPException, Request, Response
@@ -38,9 +36,8 @@ from src.pretrained import PapilaResNet18
 ROOT = Path(__file__).resolve().parents[1]
 CONFIG = ROOT / "configs" / "papila-internal-test.json"
 FRONTEND_DIST = ROOT / "frontend" / "dist"
-CHECKPOINT_URL_FILE = Path("/etc/secrets/glaucoai-checkpoint-url")
+CHECKPOINT = ROOT / "backend" / "predict" / "best.pt"
 MAX_UPLOAD_BYTES = 10 * 1024 * 1024
-MAX_CHECKPOINT_BYTES = 64 * 1024 * 1024
 MAX_PIXELS = 6_000_000
 MAX_SIDE = 4096
 PREVIEW_SIDE = 1024
@@ -114,34 +111,10 @@ def is_remote() -> bool:
     return os.getenv("RENDER") == "true"
 
 
-class NoCheckpointRedirects(HTTPRedirectHandler):
-    def redirect_request(self, req, fp, code, msg, headers, newurl):
-        return None
-
-
-def _remote_checkpoint() -> bytes:
-    try:
-        url = CHECKPOINT_URL_FILE.read_text(encoding="utf-8").strip()
-        origin = urlsplit(url)
-        valid = origin.scheme == "https" and origin.hostname and not origin.username and not origin.password
-    except (OSError, ValueError):
-        valid = False
-    if not valid:
-        raise ValueError("Configura el archivo secreto glaucoai-checkpoint-url con una URL HTTPS privada.")
-    try:
-        with build_opener(NoCheckpointRedirects()).open(url, timeout=30) as response:
-            content = response.read(MAX_CHECKPOINT_BYTES + 1)
-    except (OSError, ValueError):
-        raise ValueError("No se pudo descargar el checkpoint. Revisa la vigencia y los permisos de la URL.") from None
-    if len(content) > MAX_CHECKPOINT_BYTES:
-        raise ValueError("El checkpoint remoto supera 64 MiB.")
-    return content
-
-
 def load_model() -> ModelService:
     spec = json.loads(CONFIG.read_text(encoding="utf-8"))["models"]["ResNet18"]
     # Load the same bytes whose digest was verified, even if the file is replaced.
-    content = _remote_checkpoint() if is_remote() else (ROOT / spec["checkpoint"]).read_bytes()
+    content = CHECKPOINT.read_bytes()
     if hashlib.sha256(content).hexdigest() != spec["sha256"]:
         raise ValueError("SHA-256 del checkpoint ResNet18 distinto del congelado.")
     device = select_device(prefer_cuda=os.environ.get("GLAUCOAI_CPU") != "1", enable_amp=False).device
@@ -211,7 +184,7 @@ async def lifespan(app: FastAPI):
         app.state.service = load_model()
         logger.info("ResNet18 verificada y cargada en %s.", app.state.service.device)
     except FileNotFoundError:
-        logger.error("Falta el checkpoint models/runs/papila-resnet18/best.pt o su configuración.")
+        logger.error("Falta el checkpoint backend/predict/best.pt o su configuración.")
     except ValueError as error:
         logger.error("No se pudo verificar el modelo: %s", error)
     except (OSError, RuntimeError, KeyError):
