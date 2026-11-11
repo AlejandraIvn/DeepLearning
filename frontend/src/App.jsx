@@ -1,5 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import './App.css'
+import './NetworkJourney.css'
+import NetworkJourney from './NetworkJourney.jsx'
 
 const maxImageBytes = 10 * 1024 * 1024
 const scoreFormat = new Intl.NumberFormat('es-CO', { minimumFractionDigits: 4, maximumFractionDigits: 4 })
@@ -307,6 +309,14 @@ function App() {
           </div>
         </section>
       </main>
+
+      {preview && (
+        <a className="journey-link" href="#recorrido">
+          Ver cómo la red procesa esta imagen, paso a paso ↓
+        </a>
+      )}
+
+      <NetworkJourney preview={preview} result={result} />
 
       <section className="how">
         <h2>¿Cómo funciona?</h2>
