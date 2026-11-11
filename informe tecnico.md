@@ -1,10 +1,5 @@
 # GlaucoAI: clasificación de glaucoma en imágenes de fondo de ojo con aprendizaje profundo
 
-
-> **Alcance.** Trabajo académico. Los modelos entregan puntajes experimentales sin calibrar y no son un instrumento de diagnóstico clínico.
-
----
-
 ## 1. Resumen
 
 El proyecto clasifica imágenes de fondo de ojo del dataset PAPILA (420 imágenes de 210 pacientes) en **sano** o **glaucoma**. Se desarrollaron una **CNN pequeña entrenada desde cero** y modelos con **transfer learning** desde ImageNet (ResNet18, ResNet34 y EfficientNet-B0). La demostración web sirve una **ResNet34**.
