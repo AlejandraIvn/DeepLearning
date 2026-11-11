@@ -1,0 +1,30 @@
+# Datos locales, pesos y resultados de entrenamiento
+data/
+/models/**/*.pt
+/models/**/*.pth
+/models/**/*.onnx
+/models/**/*.ckpt
+/models/runs/
+
+# Python / Jupyter
+__pycache__/
+*.py[co]
+.ipynb_checkpoints/
+.venv/
+venv/
+.pytest_cache/
+.coverage
+.coverage.*
+htmlcov/
+
+# Configuración local
+.env
+.env.*
+!.env.example
+!.env.*.example
+/glaucoai-checkpoint-url
+.vercel/
+
+# Archivos del sistema operativo
+.DS_Store
+Thumbs.db
