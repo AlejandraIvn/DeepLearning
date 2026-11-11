@@ -2,7 +2,7 @@
 
 GlaucoAI es un proyecto académico de Deep Learning que clasifica imágenes de fondo de ojo en **sano** o **glaucoma** y explica la decisión con mapas Grad-CAM. Esta documentación describe el repositorio en `main` (commit `1f7e970`, 10-nov-2026).
 
-> **Aviso:** no es un instrumento de diagnóstico clínico.
+> **Advertencia:** no es un instrumento de diagnóstico clínico.
 
 ## Por dónde empezar
 
